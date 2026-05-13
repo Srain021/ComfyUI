@@ -97,6 +97,47 @@ async def test_load_custom_node_collision_across_sources(tmp_path):
     )
 
 
+@pytest.mark.asyncio
+async def test_load_custom_node_attaches_pyproject_metadata(tmp_path):
+    pack_dir = tmp_path / "MyCoolPack"
+    pack_dir.mkdir()
+    (pack_dir / "__init__.py").write_text("raise RuntimeError('boom')\n")
+    (pack_dir / "pyproject.toml").write_text(textwrap.dedent("""\
+        [project]
+        name = "comfyui-mycoolpack"
+        version = "1.2.3"
+
+        [project.urls]
+        Repository = "https://github.com/example/comfyui-mycoolpack"
+
+        [tool.comfy]
+        PublisherId = "example"
+        DisplayName = "My Cool Pack"
+    """))
+
+    success = await nodes.load_custom_node(str(pack_dir), module_parent="custom_nodes")
+    assert success is False
+
+    entry = nodes.NODE_STARTUP_ERRORS["custom_node:MyCoolPack"]
+    assert "pyproject" in entry, entry
+    py = entry["pyproject"]
+    assert py["pack_id"] == "comfyui-mycoolpack"
+    assert py["display_name"] == "My Cool Pack"
+    assert py["publisher_id"] == "example"
+    assert py["version"] == "1.2.3"
+    assert py["repository"] == "https://github.com/example/comfyui-mycoolpack"
+
+
+@pytest.mark.asyncio
+async def test_load_custom_node_no_pyproject_skips_metadata(tmp_path):
+    # Single-file extras-style module: no pyproject.toml exists alongside it,
+    # so the entry must not contain a 'pyproject' key.
+    module_path = _write_broken_module(tmp_path, "lonely")
+    assert await nodes.load_custom_node(module_path, module_parent="comfy_extras") is False
+    entry = nodes.NODE_STARTUP_ERRORS["comfy_extra:lonely"]
+    assert "pyproject" not in entry
+
+
 def test_unknown_module_parent_defaults_to_custom_node():
     assert nodes._node_source_from_parent("custom_nodes") == "custom_node"
     assert nodes._node_source_from_parent("comfy_extras") == "comfy_extra"

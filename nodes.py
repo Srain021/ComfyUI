@@ -2202,12 +2202,45 @@ def _node_source_from_parent(module_parent: str) -> str:
 NODE_STARTUP_ERRORS: dict[str, dict] = {}
 
 
+def _read_pyproject_metadata(module_path: str) -> dict | None:
+    """Best-effort extraction of node-pack identity from pyproject.toml.
+
+    Returns a dict with the Comfy Registry-style identity (pack_id,
+    display_name, publisher_id, version, repository) when the module
+    directory contains a pyproject.toml. Returns None when no toml is
+    present or parsing fails for any reason — startup-error tracking
+    must never itself raise.
+    """
+    if not module_path or not os.path.isdir(module_path):
+        return None
+    toml_path = os.path.join(module_path, "pyproject.toml")
+    if not os.path.isfile(toml_path):
+        return None
+    try:
+        from comfy_config import config_parser
+
+        cfg = config_parser.extract_node_configuration(module_path)
+        if cfg is None:
+            return None
+        meta = {
+            "pack_id": cfg.project.name or None,
+            "display_name": cfg.tool_comfy.display_name or None,
+            "publisher_id": cfg.tool_comfy.publisher_id or None,
+            "version": cfg.project.version or None,
+            "repository": cfg.project.urls.repository or None,
+        }
+        # Drop empty fields so the API payload stays compact.
+        return {k: v for k, v in meta.items() if v}
+    except Exception:
+        return None
+
+
 def record_node_startup_error(
     *, module_path: str, source: str, phase: str, error: BaseException, tb: str
 ) -> None:
     """Record a startup error for a node module so it can be exposed via the API."""
     module_name = get_module_name(module_path)
-    NODE_STARTUP_ERRORS[f"{source}:{module_name}"] = {
+    entry = {
         "source": source,
         "module_name": module_name,
         "module_path": module_path,
@@ -2215,6 +2248,10 @@ def record_node_startup_error(
         "traceback": tb,
         "phase": phase,
     }
+    pyproject = _read_pyproject_metadata(module_path)
+    if pyproject:
+        entry["pyproject"] = pyproject
+    NODE_STARTUP_ERRORS[f"{source}:{module_name}"] = entry
 
 
 def get_module_name(module_path: str) -> str:
