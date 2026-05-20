@@ -215,17 +215,19 @@ def get_all_torch_devices(exclude_current=False):
     if cpu_state == CPUState.GPU:
         if is_nvidia():
             for i in range(torch.cuda.device_count()):
-                devices.append(torch.device(i))
+                devices.append(torch.device("cuda", i))
         elif is_intel_xpu():
             for i in range(torch.xpu.device_count()):
-                devices.append(torch.device(i))
+                devices.append(torch.device("xpu", i))
         elif is_ascend_npu():
             for i in range(torch.npu.device_count()):
-                devices.append(torch.device(i))
+                devices.append(torch.device("npu", i))
     else:
         devices.append(get_torch_device())
     if exclude_current:
-        devices.remove(get_torch_device())
+        current = get_torch_device()
+        if current in devices:
+            devices.remove(current)
     return devices
 
 def get_gpu_device_options():
