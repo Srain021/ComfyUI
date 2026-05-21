@@ -61,7 +61,7 @@ class TestTimeCursor:
         assert decoded == ts
 
     def test_decode_returns_utc(self):
-        payload = CursorPayload(sort_field="created_at", value="1716200000123456", id="id-1")
+        payload = CursorPayload(sort_field="created_at", value="1716200000123456", id="id-1", order="desc")
         decoded = decode_cursor_time(payload)
         assert decoded.tzinfo == timezone.utc
 
@@ -72,7 +72,7 @@ class TestTimeCursor:
 
     def test_non_integer_value_rejected_on_decode(self):
         with pytest.raises(InvalidCursorError):
-            decode_cursor_time(CursorPayload("created_at", "not-a-number", "id-1"))
+            decode_cursor_time(CursorPayload("created_at", "not-a-number", "id-1", "desc"))
 
     def test_none_payload_rejected(self):
         with pytest.raises(InvalidCursorError):
@@ -89,11 +89,11 @@ class TestTimeCursor:
 
 class TestIntCursor:
     def test_decode_int(self):
-        assert decode_cursor_int(CursorPayload("size", "1024", "id-1")) == 1024
+        assert decode_cursor_int(CursorPayload("size", "1024", "id-1", "desc")) == 1024
 
     def test_decode_int_rejects_non_int(self):
         with pytest.raises(InvalidCursorError):
-            decode_cursor_int(CursorPayload("size", "abc", "id-1"))
+            decode_cursor_int(CursorPayload("size", "abc", "id-1", "desc"))
 
     def test_decode_int_rejects_none(self):
         with pytest.raises(InvalidCursorError):
@@ -223,14 +223,14 @@ class TestOrderBinding:
         with pytest.raises(InvalidCursorError, match="unsupported order"):
             decode_cursor(encoded, ALLOWED)
 
-    def test_legacy_cursor_without_order_accepted(self):
-        """Cursors minted by a producer that didn't include `o` (e.g. an older
-        cloud build) must still decode — the order binding is best-effort
-        until cloud mirrors the field."""
+    def test_cursor_without_order_rejected(self):
+        """`o` is mandatory. A cursor minted without it is rejected as
+        malformed rather than silently walking the keyset in whatever
+        direction the request happens to ask for."""
         raw = b'{"s":"name","v":"x","id":"id-1"}'
         encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-        payload = decode_cursor(encoded, ALLOWED, expected_order="desc")
-        assert payload.order is None  # binding skipped, decode succeeds
+        with pytest.raises(InvalidCursorError, match="missing or non-string o"):
+            decode_cursor(encoded, ALLOWED, expected_order="desc")
 
 
 class TestGoCompatJsonEscaping:

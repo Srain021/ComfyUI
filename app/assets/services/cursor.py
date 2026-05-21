@@ -9,11 +9,10 @@ runtimes. Payload JSON uses short keys to keep the encoded length small:
 The `o` key binds the cursor to the sort direction it was minted under,
 so replaying a `desc` cursor against an `asc` request fails with
 ``INVALID_CURSOR`` rather than silently walking the wrong direction.
-Decoders accept payloads without `o` for backward compatibility with
-cursors minted before the binding was introduced (these skip the order
-check); new cursors always include it. Cloud has a follow-up to mirror
-the field — until then, Python and cloud cursors differ by exactly the
-`o` key.
+`o` is mandatory on every payload — a cursor without it is rejected as
+malformed. Cloud will land the same field in its mirror PR; until then,
+Python and cloud cursors differ by exactly the `o` key, and a cloud-
+minted cursor cannot be decoded by this endpoint.
 
 Encoding is base64url with no padding. JSON serialization escapes `<`,
 `>`, `&`, U+2028, and U+2029 to match Go's default `json.Marshal`
@@ -61,9 +60,7 @@ class CursorPayload:
     sort_field: str
     value: str
     id: str
-    # None means "minted by a producer that did not bind order" (e.g. a cloud
-    # cursor from before BE-944's follow-up lands). New cursors always set it.
-    order: str | None = None
+    order: str
 
 
 # Order direction tokens. Mirrored on the cloud follow-up so cursors carrying
@@ -123,9 +120,8 @@ def decode_cursor(
     timestamp string compared against a ``name`` column).
 
     ``expected_order`` (``"asc"``/``"desc"``), when supplied, must match the
-    payload's ``o`` field. Cursors minted without ``o`` (e.g. by an older
-    cloud build) pass the check unconditionally — the binding is best-effort
-    until both runtimes ship the field.
+    payload's ``o`` field. ``o`` is required on every payload; a cursor
+    missing it is rejected as malformed.
 
     Passing no allowed fields rejects every cursor.
     """
@@ -151,7 +147,7 @@ def decode_cursor(
     sort_field = decoded.get("s")
     value = decoded.get("v")
     id = decoded.get("id")
-    order = decoded.get("o")  # may be absent on legacy cursors
+    order = decoded.get("o")
 
     if not isinstance(sort_field, str) or not isinstance(value, str) or not isinstance(id, str):
         raise InvalidCursorError("payload: missing or non-string s/v/id")
@@ -166,11 +162,11 @@ def decode_cursor(
     if sort_field not in allowed_sort_fields:
         raise InvalidCursorError(f"unsupported sort field {sort_field!r}")
 
-    if order is not None and not isinstance(order, str):
-        raise InvalidCursorError("payload: non-string o")
-    if order is not None and order not in _VALID_ORDERS:
+    if not isinstance(order, str):
+        raise InvalidCursorError("missing or non-string o")
+    if order not in _VALID_ORDERS:
         raise InvalidCursorError(f"unsupported order {order!r}")
-    if expected_order is not None and order is not None and order != expected_order:
+    if expected_order is not None and order != expected_order:
         raise InvalidCursorError(
             f"cursor order {order!r} does not match request order {expected_order!r}"
         )
