@@ -276,12 +276,14 @@ def test_cursor_invalid_cursor_at_microsecond_boundary(http: requests.Session, a
     import base64
     import json
     # 10^18 microseconds ≈ year 33658, well past datetime.MAX_YEAR.
-    payload = {"s": "created_at", "v": "999999999999999999999", "id": "asset-x"}
+    # `o` and `order=` must be set; otherwise decode fails earlier on the
+    # missing-order branch and the µs-overflow path is never exercised.
+    payload = {"s": "created_at", "o": "desc", "v": "999999999999999999999", "id": "asset-x"}
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     cursor = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
     r = http.get(
         api_base + "/api/assets",
-        params={"after": cursor, "sort": "created_at"},
+        params={"after": cursor, "sort": "created_at", "order": "desc"},
         timeout=120,
     )
     assert r.status_code == 400, r.text
