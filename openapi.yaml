@@ -6315,22 +6315,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - message
-              properties:
-                message:
-                  type: string
-                  description: Feedback message
-                rating:
-                  type: integer
-                  minimum: 1
-                  maximum: 5
-                  description: Optional satisfaction rating
-                context:
-                  type: object
-                  additionalProperties: true
-                  description: Additional context metadata
+              $ref: "#/components/schemas/FeedbackRequest"
       responses:
         "201":
           description: Feedback submitted
@@ -7535,6 +7520,12 @@ components:
           description: Unique job identifier (same as prompt_id)
         status:
           type: string
+          enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+            - cancelled
           description: Current job status
         create_time:
           type: integer
@@ -7568,6 +7559,12 @@ components:
           format: uuid
         status:
           type: string
+          enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+            - cancelled
         workflow:
           type: object
           additionalProperties: true
@@ -9598,6 +9595,12 @@ components:
           $ref: "#/components/schemas/BillingBalance"
         has_payment_method:
           type: boolean
+      enum:
+        - awaiting_payment_method
+        - pending_payment
+        - paid
+        - payment_failed
+        - inactive
 
     BillingSubscription:
       type: object
@@ -11666,3 +11669,24 @@ components:
             $ref: '#/components/schemas/WorkflowResponse'
         pagination:
           $ref: '#/components/schemas/PaginationInfo'
+
+    FeedbackRequest:
+      type: object
+      x-runtime: [cloud]
+      description: "[cloud-only] User feedback submission body."
+      required:
+        - message
+      properties:
+        type:
+          type: string
+          enum:
+            - missing_nodes
+            - general
+            - missing_models
+          description: Feedback category
+        category:
+          type: string
+          description: Additional category metadata
+        message:
+          type: string
+          description: User-provided feedback message
