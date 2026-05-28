@@ -3696,6 +3696,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/hub/profiles/{username}:
+    get:
+      operationId: getHubProfile
+      tags: [hub]
+      summary: Get a hub profile by username
+      description: "[cloud-only] Returns the public hub profile for the given username."
+      x-runtime: [cloud]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Hub username
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HubProfile"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudError"
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/hub/profiles/check:
     get:
       operationId: checkHubUsername
