@@ -1390,6 +1390,184 @@ class DynamicSlot(ComfyTypeI):
         out_dict[input_type][finalized_id] = value
         out_dict["dynamic_paths"][finalized_id] = finalize_prefix(curr_prefix, curr_prefix[-1])
 
+
+@dataclass
+class FinalizedOutputs:
+    """Resolved set of active output slots for a single prompt execution.
+
+    Produced by :py:func:`get_finalized_class_outputs`; held alongside V1's
+    ``RETURN_TYPES`` view so the execution engine can size results, validate
+    link indices, and reorder named ``NodeOutput`` results against it.
+    """
+    outputs: list[Output]
+    output_ids: list[str]
+    return_types: list[str]
+    return_names: list[str]
+    output_is_list: list[bool]
+    output_tooltips: list[str | None]
+
+    def __len__(self) -> int:
+        return len(self.outputs)
+
+
+class DynamicOutputs:
+    """Container namespace for dynamic output group declarations.
+
+    Place an instance of one of the inner classes (e.g. ``DynamicOutputs.ByKey``)
+    directly inside ``Schema.outputs`` to declare a set of outputs whose shape
+    depends on prompt data. The active branch is chosen at execution time by
+    :py:func:`get_finalized_class_outputs`.
+
+    Current limitations (first slice):
+
+      * Only :py:class:`DynamicOutputs.ByKey` is implemented.
+      * Selector must be a literal (Combo/string) input on the same node — links
+        are rejected so finalization is a pure function of prompt-finalizable
+        data.
+      * Inactive options do not produce placeholder slots — downstream links to
+        nonexistent finalized slots are rejected by validation.
+    """
+
+    class Option:
+        """One branch of outputs revealed when the selector matches ``key``."""
+
+        def __init__(self, key: str, outputs: list[Output]):
+            if not isinstance(key, str) or not key:
+                raise ValueError("DynamicOutputs.Option: key must be a non-empty string")
+            for o in outputs:
+                if not isinstance(o, Output):
+                    raise ValueError(
+                        f"DynamicOutputs.Option: outputs must contain Output instances, got {o!r}"
+                    )
+                if o.id is None:
+                    raise ValueError("DynamicOutputs.Option: every output must declare an id")
+            self.key = key
+            self.outputs = outputs
+
+        def as_dict(self):
+            return {
+                "key": self.key,
+                "outputs": [
+                    {
+                        "id": o.id,
+                        "type": o.get_io_type(),
+                        **o.as_dict(),
+                    }
+                    for o in self.outputs
+                ],
+            }
+
+    class ByKey:
+        """Active outputs are picked by the literal value of one of the node's inputs."""
+
+        kind = "by_key"
+
+        def __init__(self, id: str, selector: str, options: list[DynamicOutputs.Option]):
+            if not isinstance(id, str) or not id:
+                raise ValueError("DynamicOutputs.ByKey: id must be a non-empty string")
+            if not isinstance(selector, str) or not selector:
+                raise ValueError("DynamicOutputs.ByKey: selector must be a non-empty string input id")
+            if not options:
+                raise ValueError("DynamicOutputs.ByKey: at least one Option is required")
+            seen_keys: set[str] = set()
+            seen_ids: set[str] = set()
+            for opt in options:
+                if not isinstance(opt, DynamicOutputs.Option):
+                    raise ValueError(
+                        f"DynamicOutputs.ByKey: options must be DynamicOutputs.Option, got {opt!r}"
+                    )
+                if opt.key in seen_keys:
+                    raise ValueError(f"DynamicOutputs.ByKey: duplicate option key {opt.key!r}")
+                seen_keys.add(opt.key)
+                for o in opt.outputs:
+                    if o.id in seen_ids:
+                        raise ValueError(
+                            f"DynamicOutputs.ByKey: output id {o.id!r} appears in more than one option; "
+                            "each output id must be unique within the group"
+                        )
+                    seen_ids.add(o.id)
+            self.id = id
+            self.selector = selector
+            self.options = options
+
+        def as_dict(self):
+            return {
+                "id": self.id,
+                "kind": self.kind,
+                "selector": self.selector,
+                "options": [opt.as_dict() for opt in self.options],
+            }
+
+        def select(self, prompt_inputs: dict[str, Any]) -> DynamicOutputs.Option | None:
+            """Pick the matching ``Option`` for the prompt's selector value, or ``None``."""
+            value = prompt_inputs.get(self.selector)
+            # Links are ``[node_id, slot_idx]`` lists; for this slice we only accept literals.
+            if isinstance(value, list):
+                return None
+            for opt in self.options:
+                if opt.key == value:
+                    return opt
+            return None
+
+
+def _output_metadata(o: Output) -> tuple[str, str, str, bool, str | None]:
+    """Return (id, return_type, display_name, is_output_list, tooltip) for an Output."""
+    rt = o.get_io_type()
+    name = o.display_name if o.display_name else rt
+    return o.id, rt, name, o.is_output_list, (o.tooltip if o.tooltip else None)
+
+
+def get_finalized_class_outputs(
+    schema_outputs: list,
+    prompt_inputs: dict[str, Any] | None,
+    live_input_types: dict[str, str] | None = None,  # noqa: ARG001 — reserved for ByInputType
+) -> FinalizedOutputs:
+    """Resolve the active output list for a node by expanding any
+    :py:class:`DynamicOutputs` groups against ``prompt_inputs``.
+
+    Inactive options contribute no slots — downstream links to ranges that
+    only existed under a different branch are caught by validation rather
+    than silently filled with ``AnyType`` placeholders.
+    """
+    inputs = prompt_inputs or {}
+    outputs: list[Output] = []
+    ids: list[str] = []
+    types: list[str] = []
+    names: list[str] = []
+    is_list: list[bool] = []
+    tooltips: list[str | None] = []
+    for entry in schema_outputs or []:
+        if isinstance(entry, Output):
+            oid, rt, name, isl, tt = _output_metadata(entry)
+            outputs.append(entry)
+            ids.append(oid)
+            types.append(rt)
+            names.append(name)
+            is_list.append(isl)
+            tooltips.append(tt)
+        elif isinstance(entry, DynamicOutputs.ByKey):
+            selected = entry.select(inputs)
+            if selected is None:
+                continue
+            for o in selected.outputs:
+                oid, rt, name, isl, tt = _output_metadata(o)
+                outputs.append(o)
+                ids.append(oid)
+                types.append(rt)
+                names.append(name)
+                is_list.append(isl)
+                tooltips.append(tt)
+        # else: ignore unknown entries (future-proofing for new dynamic kinds)
+    return FinalizedOutputs(
+        outputs=outputs,
+        output_ids=ids,
+        return_types=types,
+        return_names=names,
+        output_is_list=is_list,
+        output_tooltips=tooltips,
+    )
+
+
 @comfytype(io_type="IMAGECOMPARE")
 class ImageCompare(ComfyTypeI):
   Type = dict
@@ -1621,6 +1799,11 @@ class NodeInfoV1:
     search_aliases: list[str]=None
     essentials_category: str=None
     has_intermediate_output: bool=None
+    dynamic_outputs: list[dict] | None = None
+    """Templates for dynamic output groups (``DynamicOutputs.ByKey`` etc.). The active
+    output list depends on prompt data and is finalized per execution; static
+    ``output`` / ``output_name`` / ``output_is_list`` arrays cover only always-present
+    outputs."""
 
 
 @dataclass
@@ -1758,13 +1941,23 @@ class Schema:
     def validate(self):
         '''Validate the schema:
         - verify ids on inputs and outputs are unique - both internally and in relation to each other
+        - verify dynamic-output groups reference real inputs and have unique active ids
         '''
         nested_inputs: list[Input] = []
         for input in self.inputs:
             if not isinstance(input, DynamicInput):
                 nested_inputs.extend(input.get_all())
         input_ids = [i.id for i in nested_inputs]
-        output_ids = [o.id for o in self.outputs]
+        # ``output_ids`` covers every id that may ever appear in a finalized
+        # output list — static outputs + every option's outputs across every
+        # dynamic group — so collisions between branches are caught up front.
+        output_ids: list[str] = []
+        for o in self.outputs:
+            if isinstance(o, Output):
+                output_ids.append(o.id)
+            elif isinstance(o, DynamicOutputs.ByKey):
+                for opt in o.options:
+                    output_ids.extend(child.id for child in opt.outputs)
         input_set = set(input_ids)
         output_set = set(output_ids)
         issues: list[str] = []
@@ -1773,13 +1966,25 @@ class Schema:
             issues.append(f"Input ids must be unique, but {[item for item, count in Counter(input_ids).items() if count > 1]} are not.")
         if len(output_set) != len(output_ids):
             issues.append(f"Output ids must be unique, but {[item for item, count in Counter(output_ids).items() if count > 1]} are not.")
+        # verify dynamic-output groups point at real inputs
+        for o in self.outputs:
+            if isinstance(o, DynamicOutputs.ByKey) and o.selector not in input_set:
+                issues.append(
+                    f"DynamicOutputs.ByKey(id={o.id!r}) selector input {o.selector!r} "
+                    f"does not exist on the schema."
+                )
         if len(issues) > 0:
             raise ValueError("\n".join(issues))
         # validate inputs and outputs
         for input in self.inputs:
             input.validate()
         for output in self.outputs:
-            output.validate()
+            if isinstance(output, Output):
+                output.validate()
+            elif isinstance(output, DynamicOutputs.ByKey):
+                for opt in output.options:
+                    for child in opt.outputs:
+                        child.validate()
         if self.price_badge is not None:
             self.price_badge.validate()
 
@@ -1804,9 +2009,10 @@ class Schema:
                 self.hidden.append(Hidden.prompt)
             if Hidden.extra_pnginfo not in self.hidden:
                 self.hidden.append(Hidden.extra_pnginfo)
-        # give outputs without ids default ids
+        # give outputs without ids default ids (dynamic groups require explicit ids
+        # so we can never accidentally collide synthesized names across branches).
         for i, output in enumerate(self.outputs):
-            if output.id is None:
+            if isinstance(output, Output) and output.id is None:
                 output.id = f"_{i}_{output.io_type}_"
 
     def get_v1_info(self, cls) -> NodeInfoV1:
@@ -1815,15 +2021,21 @@ class Schema:
         if self.hidden:
             for hidden in self.hidden:
                 input.setdefault("hidden", {})[hidden.name] = (hidden.value,)
-        # create separate lists from output fields
+        # create separate lists from output fields (static outputs only — dynamic
+        # groups are advertised separately via ``dynamic_outputs`` so the frontend
+        # and any V1 consumer see a stable always-present prefix).
         output = []
         output_is_list = []
         output_name = []
         output_tooltips = []
         output_matchtypes = []
         any_matchtypes = False
+        dynamic_outputs: list[dict[str, Any]] = []
         if self.outputs:
             for o in self.outputs:
+                if isinstance(o, DynamicOutputs.ByKey):
+                    dynamic_outputs.append(o.as_dict())
+                    continue
                 output.append(o.io_type)
                 output_is_list.append(o.is_output_list)
                 output_name.append(o.display_name if o.display_name else o.io_type)
@@ -1862,6 +2074,7 @@ class Schema:
             price_badge=self.price_badge.as_dict(self.inputs) if self.price_badge is not None else None,
             search_aliases=self.search_aliases if self.search_aliases else None,
             essentials_category=self.essentials_category,
+            dynamic_outputs=dynamic_outputs or None,
         )
         return info
 
@@ -2260,12 +2473,17 @@ class _ComfyNodeBaseInternal(_ComfyNodeInternal):
             cls._ACCEPT_ALL_INPUTS = schema.accept_all_inputs
 
         if cls._RETURN_TYPES is None:
+            # Class-level RETURN_TYPES / RETURN_NAMES / OUTPUT_IS_LIST cover the
+            # always-present static outputs only; dynamic groups are finalized
+            # per-prompt in get_finalized_class_outputs.
             output = []
             output_name = []
             output_is_list = []
             output_tooltips = []
             if schema.outputs:
                 for o in schema.outputs:
+                    if not isinstance(o, Output):
+                        continue
                     output.append(o.io_type)
                     output_name.append(o.display_name if o.display_name else o.io_type)
                     output_is_list.append(o.is_output_list)
@@ -2332,16 +2550,31 @@ class ComfyNode(_ComfyNodeBaseInternal):
 class NodeOutput(_NodeOutputInternal):
     '''
     Standardized output of a node; can pass in any number of args and/or a UIOutput into 'ui' kwarg.
+
+    For nodes whose active output list depends on prompt data (e.g. those using
+    :py:class:`DynamicOutputs`), pass ``named={output_id: value, ...}`` instead
+    of positional args. The execution engine reorders against the finalized
+    output list at run time; unknown or missing ids raise.
     '''
-    def __init__(self, *args: Any, ui: _UIOutput | dict=None, expand: dict=None, block_execution: str=None):
+    def __init__(self, *args: Any, named: dict[str, Any]=None, ui: _UIOutput | dict=None, expand: dict=None, block_execution: str=None):
+        if args and named is not None:
+            raise ValueError("NodeOutput: cannot mix positional args with named=...; choose one form")
         self.args = args
+        self.named = named
         self.ui = ui
         self.expand = expand
         self.block_execution = block_execution
 
     @property
     def result(self):
+        # Positional tuple only; named results live in ``self.named`` and are
+        # ordered against the finalized output list by the execution engine.
         return self.args if len(self.args) > 0 else None
+
+    @classmethod
+    def from_named(cls, named: dict[str, Any], *, ui: _UIOutput | dict=None, expand: dict=None, block_execution: str=None) -> NodeOutput:
+        """Build a NodeOutput keyed by output id, for dynamic-output nodes."""
+        return cls(named=named, ui=ui, expand=expand, block_execution=block_execution)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> NodeOutput:

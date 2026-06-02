@@ -314,15 +314,56 @@ async def _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, f
     return results
 
 
-def merge_result_data(results, obj):
+def _expected_output_count(obj, finalized_outputs=None):
+    """Size results / blocker tuples by the finalized output list when present."""
+    if finalized_outputs is not None:
+        return len(finalized_outputs)
+    return len(getattr(obj, "RETURN_TYPES", ()))
+
+
+def _normalize_named_result(node_output, finalized_outputs):
+    """Convert a ``NodeOutput.from_named({...})`` payload into an ordered tuple.
+
+    Strict by design: an active output id missing from the payload is an
+    error; an unknown id is an error. Use the finalized output list as the
+    single source of truth for ordering.
+    """
+    if finalized_outputs is None:
+        raise Exception(
+            "NodeOutput(named=...) is only supported for V3 nodes with a finalized "
+            "output schema (e.g. nodes using DynamicOutputs)."
+        )
+    expected_ids = finalized_outputs.output_ids
+    payload = node_output.named
+    missing = [oid for oid in expected_ids if oid not in payload]
+    unknown = [oid for oid in payload if oid not in expected_ids]
+    if missing or unknown:
+        raise Exception(
+            f"NodeOutput(named=...) ids do not match active outputs: "
+            f"missing={missing}, unknown={unknown}, expected={expected_ids}"
+        )
+    return tuple(payload[oid] for oid in expected_ids)
+
+
+def merge_result_data(results, obj, finalized_outputs=None):
     # check which outputs need concatenating
     output = []
-    output_is_list = [False] * len(results[0])
-    if hasattr(obj, "OUTPUT_IS_LIST"):
-        output_is_list = obj.OUTPUT_IS_LIST
+    expected_count = _expected_output_count(obj, finalized_outputs)
+    if finalized_outputs is not None:
+        output_is_list = finalized_outputs.output_is_list
+    else:
+        output_is_list = [False] * len(results[0])
+        if hasattr(obj, "OUTPUT_IS_LIST"):
+            output_is_list = obj.OUTPUT_IS_LIST
+
+    for r in results:
+        if len(r) != expected_count:
+            raise Exception(
+                f"Node returned {len(r)} outputs but active schema has {expected_count}"
+            )
 
     # merge node execution results
-    for i, is_list in zip(range(len(results[0])), output_is_list):
+    for i, is_list in zip(range(expected_count), output_is_list):
         if is_list:
             value = []
             for o in results:
@@ -335,19 +376,20 @@ def merge_result_data(results, obj):
             output.append([o[i] for o in results])
     return output
 
-async def get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=None, pre_execute_cb=None, v3_data=None):
+async def get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=None, pre_execute_cb=None, v3_data=None, finalized_outputs=None):
     return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
     has_pending_task = any(isinstance(r, asyncio.Task) and not r.done() for r in return_values)
     if has_pending_task:
         return return_values, {}, False, has_pending_task
-    output, ui, has_subgraph = get_output_from_returns(return_values, obj)
+    output, ui, has_subgraph = get_output_from_returns(return_values, obj, finalized_outputs=finalized_outputs)
     return output, ui, has_subgraph, False
 
-def get_output_from_returns(return_values, obj):
+def get_output_from_returns(return_values, obj, finalized_outputs=None):
     results = []
     uis = []
     subgraph_results = []
     has_subgraph = False
+    expected_count = _expected_output_count(obj, finalized_outputs)
     for i in range(len(return_values)):
         r = return_values[i]
         if isinstance(r, dict):
@@ -359,12 +401,12 @@ def get_output_from_returns(return_values, obj):
                 new_graph = r['expand']
                 result = r.get("result", None)
                 if isinstance(result, ExecutionBlocker):
-                    result = tuple([result] * len(obj.RETURN_TYPES))
+                    result = tuple([result] * expected_count)
                 subgraph_results.append((new_graph, result))
             elif 'result' in r:
                 result = r.get("result", None)
                 if isinstance(result, ExecutionBlocker):
-                    result = tuple([result] * len(obj.RETURN_TYPES))
+                    result = tuple([result] * expected_count)
                 results.append(result)
                 subgraph_results.append((None, result))
         elif isinstance(r, _NodeOutputInternal):
@@ -374,29 +416,36 @@ def get_output_from_returns(return_values, obj):
                     uis.append(r.ui)
                 else:
                     uis.append(r.ui.as_dict())
+            # Named NodeOutput → reorder against the finalized output list before
+            # downstream code treats this as a fixed-shape tuple.
+            named_result = (
+                _normalize_named_result(r, finalized_outputs)
+                if getattr(r, "named", None) is not None
+                else None
+            )
             if r.expand is not None:
                 has_subgraph = True
                 new_graph = r.expand
-                result = r.result
+                result = named_result if named_result is not None else r.result
                 if r.block_execution is not None:
-                    result = tuple([ExecutionBlocker(r.block_execution)] * len(obj.RETURN_TYPES))
+                    result = tuple([ExecutionBlocker(r.block_execution)] * expected_count)
                 subgraph_results.append((new_graph, result))
-            elif r.result is not None:
-                result = r.result
+            elif named_result is not None or r.result is not None:
+                result = named_result if named_result is not None else r.result
                 if r.block_execution is not None:
-                    result = tuple([ExecutionBlocker(r.block_execution)] * len(obj.RETURN_TYPES))
+                    result = tuple([ExecutionBlocker(r.block_execution)] * expected_count)
                 results.append(result)
                 subgraph_results.append((None, result))
         else:
             if isinstance(r, ExecutionBlocker):
-                r = tuple([r] * len(obj.RETURN_TYPES))
+                r = tuple([r] * expected_count)
             results.append(r)
             subgraph_results.append((None, r))
 
     if has_subgraph:
         output = subgraph_results
     elif len(results) > 0:
-        output = merge_result_data(results, obj)
+        output = merge_result_data(results, obj, finalized_outputs=finalized_outputs)
     else:
         output = []
     ui = dict()
@@ -444,6 +493,15 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
         execution_list.cache_update(unique_id, cached)
         return (ExecutionResult.SUCCESS, None, None)
 
+    # Finalize the active output list for this prompt (no-op for static V3 / V1
+    # nodes). Computed once per execute() call so the three output-shaping paths
+    # below — initial, pending async resume, pending subgraph resume — all agree.
+    finalized_outputs = None
+    if issubclass(class_def, _ComfyNodeInternal):
+        schema = class_def.GET_SCHEMA()
+        if any(isinstance(o, _io.DynamicOutputs.ByKey) for o in schema.outputs):
+            finalized_outputs = _io.get_finalized_class_outputs(schema.outputs, inputs)
+
     input_data_all = None
     try:
         if unique_id in pending_async_nodes:
@@ -459,7 +517,7 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
                 else:
                     results.append(r)
             del pending_async_nodes[unique_id]
-            output_data, output_ui, has_subgraph = get_output_from_returns(results, class_def)
+            output_data, output_ui, has_subgraph = get_output_from_returns(results, class_def, finalized_outputs=finalized_outputs)
         elif unique_id in pending_subgraph_results:
             cached_results = pending_subgraph_results[unique_id]
             resolved_outputs = []
@@ -478,7 +536,7 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
                         else:
                             resolved_output.append(r)
                     resolved_outputs.append(tuple(resolved_output))
-            output_data = merge_result_data(resolved_outputs, class_def)
+            output_data = merge_result_data(resolved_outputs, class_def, finalized_outputs=finalized_outputs)
             output_ui = []
             del pending_subgraph_results[unique_id]
             has_subgraph = False
@@ -536,7 +594,7 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
                 GraphBuilder.set_default_prefix(unique_id, call_index, 0)
 
             try:
-                output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)
+                output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data, finalized_outputs=finalized_outputs)
             finally:
                 if comfy.memory_management.aimdo_enabled:
                     if args.verbose == "DEBUG":
@@ -921,6 +979,24 @@ async def validate_inputs(prompt_id, prompt, item, validated, visiting=None, typ
                 continue
 
             o_id = val[0]
+            # Reject links pointing at slot indices outside the upstream node's
+            # active output list (e.g. stale link after a DynamicOutputs branch
+            # change). Reports the active count for clearer diagnostics.
+            upstream_output_count = type_resolver.finalized_output_count(o_id)
+            if not isinstance(val[1], int) or isinstance(val[1], bool) or val[1] < 0 or val[1] >= upstream_output_count:
+                error = {
+                    "type": "bad_linked_output",
+                    "message": "Linked output slot does not exist on the source node",
+                    "details": f"{x}, linked_node({o_id}), output_index({val[1]}), active_output_count({upstream_output_count})",
+                    "extra_info": {
+                        "input_name": x,
+                        "linked_node": val,
+                        "output_index": val[1],
+                        "active_output_count": upstream_output_count,
+                    }
+                }
+                errors.append(error)
+                continue
             # Walks MatchType/template chains so API workflows without
             # frontend-injected type metadata get the same answer as the UI.
             received_type = type_resolver.resolve_output_type(o_id, val[1])

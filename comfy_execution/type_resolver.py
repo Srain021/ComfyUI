@@ -142,32 +142,48 @@ class TypeResolver:
             return ANY_TYPE
         class_type = node.get("class_type")
 
-        try:
-            return_types = class_def.RETURN_TYPES
-        except Exception:
-            return ANY_TYPE
-        if return_types is None or slot_idx < 0 or slot_idx >= len(return_types):
-            return ANY_TYPE
+        # V3 schemas may declare DynamicOutputs groups whose active slots are
+        # determined by prompt inputs and do not appear in class RETURN_TYPES;
+        # resolve types against the finalized output list when present.
+        finalized = self._get_finalized_outputs(node, class_def)
+        if finalized is not None:
+            if slot_idx < 0 or slot_idx >= len(finalized):
+                return ANY_TYPE
+            declared = finalized.return_types[slot_idx]
+            resolved_output = finalized.outputs[slot_idx]
+            resolved = declared
+            if isinstance(resolved_output, io.MatchType.Output):
+                schema = getattr(class_def, "SCHEMA", None) or class_def.GET_SCHEMA()
+                resolved = self._resolve_match_template(
+                    node_id, schema, resolved_output.template.template_id, next_stack
+                )
+        else:
+            try:
+                return_types = class_def.RETURN_TYPES
+            except Exception:
+                return ANY_TYPE
+            if return_types is None or slot_idx < 0 or slot_idx >= len(return_types):
+                return ANY_TYPE
 
-        declared = return_types[slot_idx]
+            declared = return_types[slot_idx]
 
-        # Only V3 schemas carry MatchType template info; V1 RETURN_TYPES are
-        # always concrete strings.
-        resolved = declared
-        if isinstance(class_def, type) and issubclass(class_def, _ComfyNodeInternal):
-            schema = getattr(class_def, "SCHEMA", None)
-            if schema is None:
-                # RETURN_TYPES access above usually populates SCHEMA — be defensive.
-                try:
-                    schema = class_def.GET_SCHEMA()
-                except Exception:
-                    schema = None
-            if schema is not None and slot_idx < len(schema.outputs):
-                out = schema.outputs[slot_idx]
-                if isinstance(out, io.MatchType.Output):
-                    resolved = self._resolve_match_template(
-                        node_id, schema, out.template.template_id, next_stack
-                    )
+            # Only V3 schemas carry MatchType template info; V1 RETURN_TYPES are
+            # always concrete strings.
+            resolved = declared
+            if isinstance(class_def, type) and issubclass(class_def, _ComfyNodeInternal):
+                schema = getattr(class_def, "SCHEMA", None)
+                if schema is None:
+                    # RETURN_TYPES access above usually populates SCHEMA — be defensive.
+                    try:
+                        schema = class_def.GET_SCHEMA()
+                    except Exception:
+                        schema = None
+                if schema is not None and slot_idx < len(schema.outputs):
+                    out = schema.outputs[slot_idx]
+                    if isinstance(out, io.MatchType.Output):
+                        resolved = self._resolve_match_template(
+                            node_id, schema, out.template.template_id, next_stack
+                        )
 
         # Warn only for V1 wildcards declared as "*"; unresolved MatchType
         # templates warn separately in _resolve_match_template, avoiding double-warns.
@@ -216,6 +232,42 @@ class TypeResolver:
                        f"MatchType template '{template_id}' has no bound concrete upstream input; defaulting to AnyType")
         return ANY_TYPE
 
+    def _get_finalized_outputs(self, node: dict | None, class_def) -> io.FinalizedOutputs | None:
+        """Return ``FinalizedOutputs`` for V3 nodes with DynamicOutputs groups, else ``None``.
+
+        ``None`` means "use the class-level static arrays" (V1 nodes or V3
+        without any dynamic group), keeping the hot path zero-cost.
+        """
+        if not (isinstance(class_def, type) and issubclass(class_def, _ComfyNodeInternal)):
+            return None
+        try:
+            schema = class_def.GET_SCHEMA()
+        except Exception:
+            return None
+        if not any(isinstance(o, io.DynamicOutputs.ByKey) for o in schema.outputs):
+            return None
+        prompt_inputs = (node or {}).get("inputs", {}) or {}
+        return io.get_finalized_class_outputs(schema.outputs, prompt_inputs)
+
+    def finalized_output_count(self, node_id: str) -> int:
+        """Number of active output slots on ``node_id``'s schema for the current prompt.
+
+        For V3 nodes with :py:class:`comfy_api.latest._io.DynamicOutputs` groups
+        the count is computed against the node's prompt inputs; for static V3
+        / V1 nodes it falls back to ``len(RETURN_TYPES)``. Unknown nodes
+        report ``0``.
+        """
+        node, class_def = self._get_class_def_for_node(node_id)
+        if class_def is None:
+            return 0
+        finalized = self._get_finalized_outputs(node, class_def)
+        if finalized is not None:
+            return len(finalized)
+        try:
+            return len(class_def.RETURN_TYPES)
+        except Exception:
+            return 0
+
     def is_output_list(self, node_id: str, slot_idx: int) -> bool:
         """Whether the source slot is declared as a list output (``OUTPUT_IS_LIST[idx]``)."""
         if isinstance(slot_idx, bool) or not isinstance(slot_idx, int):
@@ -224,11 +276,16 @@ class TypeResolver:
         if cache_key in self._is_output_list_cache:
             return self._is_output_list_cache[cache_key]
         result = False
-        _, class_def = self._get_class_def_for_node(node_id)
+        node, class_def = self._get_class_def_for_node(node_id)
         if class_def is not None:
-            lst = getattr(class_def, "OUTPUT_IS_LIST", None)
-            if lst is not None and 0 <= slot_idx < len(lst):
-                result = bool(lst[slot_idx])
+            finalized = self._get_finalized_outputs(node, class_def)
+            if finalized is not None:
+                if 0 <= slot_idx < len(finalized):
+                    result = bool(finalized.output_is_list[slot_idx])
+            else:
+                lst = getattr(class_def, "OUTPUT_IS_LIST", None)
+                if lst is not None and 0 <= slot_idx < len(lst):
+                    result = bool(lst[slot_idx])
         self._is_output_list_cache[cache_key] = result
         return result
 
