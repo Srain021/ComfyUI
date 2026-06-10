@@ -18,6 +18,7 @@ from app.assets.database.queries import (
     fetch_reference_asset_and_tags,
     fetch_reference_and_asset,
     count_model_references_by_folder,
+    list_model_reference_paths_by_folder,
     update_reference_access_time,
     set_reference_metadata,
     delete_reference_by_id,
@@ -77,7 +78,14 @@ class TestModelFoldersDebugPayload:
         )
 
         payload = _build_model_folders_response_payload(
-            {"checkpoints": 3, "text_encoders/clip": 1}
+            {"checkpoints": 3, "text_encoders/clip": 1},
+            [
+                ("checkpoints", "/models/checkpoints/a.safetensors"),
+                ("checkpoints", "/models/checkpoints/nested/b.safetensors"),
+                ("checkpoints", "/extra/checkpoints/c.safetensors"),
+                ("checkpoints", "/unregistered/checkpoints/d.safetensors"),
+                ("text_encoders/clip", "/models/text_encoders/clip/clip.safetensors"),
+            ],
         )
 
         assert payload == {
@@ -86,15 +94,55 @@ class TestModelFoldersDebugPayload:
                     "name": "checkpoints",
                     "folders": ["/models/checkpoints", "/extra/checkpoints"],
                     "count": 3,
+                    "folder_counts": [
+                        {"folder": "/models/checkpoints", "count": 2},
+                        {"folder": "/extra/checkpoints", "count": 1},
+                    ],
                 },
                 {
                     "name": "text_encoders/clip",
                     "folders": ["/models/text_encoders/clip"],
                     "count": 1,
+                    "folder_counts": [
+                        {"folder": "/models/text_encoders/clip", "count": 1},
+                    ],
                 },
             ],
             "total": 2,
         }
+
+    def test_folder_counts_use_deepest_registered_physical_root(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(
+            "app.assets.api.routes.get_comfy_models_folders",
+            lambda: [
+                (
+                    "checkpoints",
+                    ["/models/checkpoints", "/models/checkpoints/nested"],
+                ),
+            ],
+        )
+
+        payload = _build_model_folders_response_payload(
+            {"checkpoints": 2},
+            [
+                ("checkpoints", "/models/checkpoints/base.safetensors"),
+                ("checkpoints", "/models/checkpoints/nested/deeper.safetensors"),
+            ],
+        )
+
+        assert payload["model_folders"] == [
+            {
+                "name": "checkpoints",
+                "folders": ["/models/checkpoints", "/models/checkpoints/nested"],
+                "count": 2,
+                "folder_counts": [
+                    {"folder": "/models/checkpoints", "count": 1},
+                    {"folder": "/models/checkpoints/nested", "count": 1},
+                ],
+            }
+        ]
 
 
 def _make_asset(session: Session, hash_val: str | None = None, size: int = 1024) -> Asset:
@@ -859,6 +907,58 @@ class TestModelFolderCounts:
             "loras": 1,
         }
         assert private.owner_id == "other-user"
+
+    def test_lists_visible_active_model_reference_paths_by_folder(self, session: Session):
+        asset = _make_asset(session, "hash-path-counts")
+        visible = _make_reference(
+            session,
+            asset,
+            name="checkpoint",
+            file_path="/models/checkpoints/a.safetensors",
+            asset_type="model",
+            model_folder="checkpoints",
+        )
+        _make_reference(
+            session,
+            asset,
+            name="pathless",
+            asset_type="model",
+            model_folder="checkpoints",
+        )
+        _make_reference(
+            session,
+            asset,
+            name="input",
+            file_path="/input/a.png",
+            asset_type="input",
+        )
+        missing = _make_reference(
+            session,
+            asset,
+            name="missing",
+            file_path="/models/checkpoints/missing.safetensors",
+            asset_type="model",
+            model_folder="checkpoints",
+        )
+        missing.is_missing = True
+        private = _make_reference(
+            session,
+            asset,
+            name="private",
+            owner_id="other-user",
+            file_path="/models/checkpoints/private.safetensors",
+            asset_type="model",
+            model_folder="checkpoints",
+        )
+        session.commit()
+
+        assert list_model_reference_paths_by_folder(session, owner_id="") == [
+            ("checkpoints", visible.file_path)
+        ]
+        assert set(list_model_reference_paths_by_folder(session, owner_id="other-user")) == {
+            ("checkpoints", visible.file_path),
+            ("checkpoints", private.file_path),
+        }
 
 
 class TestFetchReferenceAssetAndTags:

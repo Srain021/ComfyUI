@@ -367,6 +367,23 @@ def count_model_references_by_folder(
     return {model_folder: int(count) for model_folder, count in rows}
 
 
+def list_model_reference_paths_by_folder(
+    session: Session,
+    owner_id: str = "",
+) -> list[tuple[str, str]]:
+    """Return visible active model reference model_folder/file_path pairs."""
+    rows = session.execute(
+        select(AssetReference.model_folder, AssetReference.file_path)
+        .where(build_visible_owner_clause(owner_id))
+        .where(AssetReference.is_missing == False)  # noqa: E712
+        .where(AssetReference.deleted_at.is_(None))
+        .where(AssetReference.asset_type == "model")
+        .where(AssetReference.model_folder.isnot(None))
+        .where(AssetReference.file_path.isnot(None))
+    ).all()
+    return [(model_folder, file_path) for model_folder, file_path in rows]
+
+
 def fetch_reference_asset_and_tags(
     session: Session,
     reference_id: str,

@@ -3,6 +3,7 @@ import functools
 import json
 import logging
 import os
+from pathlib import Path
 import urllib.parse
 import uuid
 from typing import Any
@@ -33,6 +34,7 @@ from app.assets.services import (
     get_asset_detail,
     list_assets_page,
     list_model_folder_counts,
+    list_model_folder_reference_paths,
     list_tags,
     remove_tags,
     resolve_asset_for_download,
@@ -238,11 +240,45 @@ def _build_asset_response(result: schemas.AssetDetailResult | schemas.UploadResu
 
 def _build_model_folders_response_payload(
     counts_by_folder: dict[str, int] | None = None,
+    reference_paths_by_folder: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     counts_by_folder = counts_by_folder or {}
+    reference_paths_by_folder = reference_paths_by_folder or []
+
+    registered_model_folders = get_comfy_models_folders()
+    folder_count_lookup: dict[tuple[str, str], int] = {}
+    registered_by_name = {
+        name: [os.path.abspath(folder) for folder in folders]
+        for name, folders in registered_model_folders
+    }
+    for model_folder, file_path in reference_paths_by_folder:
+        file_path_abs = os.path.abspath(file_path)
+        candidates = [
+            folder
+            for folder in registered_by_name.get(model_folder, [])
+            if Path(file_path_abs).is_relative_to(folder)
+        ]
+        if not candidates:
+            continue
+        matched_folder = max(candidates, key=len)
+        folder_count_lookup[(model_folder, matched_folder)] = (
+            folder_count_lookup.get((model_folder, matched_folder), 0) + 1
+        )
+
     model_folders = [
-        {"name": name, "folders": folders, "count": counts_by_folder.get(name, 0)}
-        for name, folders in get_comfy_models_folders()
+        {
+            "name": name,
+            "folders": folders,
+            "count": counts_by_folder.get(name, 0),
+            "folder_counts": [
+                {
+                    "folder": folder,
+                    "count": folder_count_lookup.get((name, os.path.abspath(folder)), 0),
+                }
+                for folder in folders
+            ],
+        }
+        for name, folders in registered_model_folders
     ]
     return {"model_folders": model_folders, "total": len(model_folders)}
 
@@ -305,8 +341,10 @@ async def list_assets_route(request: web.Request) -> web.Response:
 @_require_assets_feature_enabled
 async def list_model_folders_route(request: web.Request) -> web.Response:
     """Debug endpoint for registered model folders known to the assets API."""
-    counts = list_model_folder_counts(owner_id=USER_MANAGER.get_request_user_id(request))
-    return web.json_response(_build_model_folders_response_payload(counts))
+    owner_id = USER_MANAGER.get_request_user_id(request)
+    counts = list_model_folder_counts(owner_id=owner_id)
+    reference_paths = list_model_folder_reference_paths(owner_id=owner_id)
+    return web.json_response(_build_model_folders_response_payload(counts, reference_paths))
 
 
 @ROUTES.get(f"/api/assets/{{id:{UUID_RE}}}")

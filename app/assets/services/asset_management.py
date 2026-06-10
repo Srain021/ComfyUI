@@ -19,6 +19,7 @@ from app.assets.database.queries import (
     list_all_file_paths_by_asset_id,
     list_references_by_asset_id,
     count_model_references_by_folder,
+    list_model_reference_paths_by_folder,
     set_reference_metadata,
     set_reference_preview,
     set_reference_tags,
@@ -288,6 +289,11 @@ def list_assets_page(
 def list_model_folder_counts(owner_id: str = "") -> dict[str, int]:
     with create_session() as session:
         return count_model_references_by_folder(session, owner_id=owner_id)
+
+
+def list_model_folder_reference_paths(owner_id: str = "") -> list[tuple[str, str]]:
+    with create_session() as session:
+        return list_model_reference_paths_by_folder(session, owner_id=owner_id)
 
 
 def resolve_hash_to_path(
