@@ -257,7 +257,7 @@ class ConditioningZeroOut:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "zero_out"
 
-    CATEGORY = "model/conditioning"
+    CATEGORY = "model/conditioning/transform"
 
     def zero_out(self, conditioning):
         c = []

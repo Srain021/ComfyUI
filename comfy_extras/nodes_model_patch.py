@@ -676,7 +676,7 @@ NODE_CLASS_MAPPINGS = {
     "SUPIRApply": SUPIRApply,
 }
 
-NODE_DISPLAY_NAMES = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "ModelPatchLoader": "Load Model Patch",
     "QwenImageDiffsynthControlnet": "Apply Qwen Image DiffSynth ControlNet",
     "ZImageFunControlnet": "Apply Z-Image Fun ControlNet",
