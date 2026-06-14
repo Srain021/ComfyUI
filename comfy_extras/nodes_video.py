@@ -136,6 +136,17 @@ class CreateVideo(io.ComfyNode):
                 io.Image.Input("images", tooltip="The images to create a video from."),
                 io.Float.Input("fps", default=30.0, min=1.0, max=120.0, step=1.0),
                 io.Audio.Input("audio", optional=True, tooltip="The audio to add to the video."),
+                io.Int.Input(
+                    "bit_depth",
+                    min=8,
+                    max=10,
+                    default=8,
+                    step=2,
+                    tooltip="Bit depth of the created video. 10-bit keeps smoother gradients with less"
+                    " banding, but some players and downstream nodes may not support it.",
+                    optional=True,
+                    display_mode=io.NumberDisplay.number,
+                ),
             ],
             outputs=[
                 io.Video.Output(),
@@ -143,9 +154,14 @@ class CreateVideo(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images: Input.Image, fps: float, audio: Optional[Input.Audio] = None) -> io.NodeOutput:
+    def execute(
+        cls, images: Input.Image, fps: float, audio: Optional[Input.Audio] = None, bit_depth: int = 8,
+    ) -> io.NodeOutput:
         return io.NodeOutput(
-            InputImpl.VideoFromComponents(Types.VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps)))
+            InputImpl.VideoFromComponents(
+                Types.VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps)),
+                bit_depth=bit_depth,
+            )
         )
 
 class GetVideoComponents(io.ComfyNode):
@@ -156,7 +172,7 @@ class GetVideoComponents(io.ComfyNode):
             search_aliases=["extract frames", "split video", "video to images", "demux"],
             display_name="Get Video Components",
             category="video",
-            description="Extracts all components from a video: frames, audio, and framerate.",
+            description="Extracts all components from a video: frames, audio, framerate, and bit depth.",
             inputs=[
                 io.Video.Input("video", tooltip="The video to extract components from."),
             ],
@@ -164,13 +180,14 @@ class GetVideoComponents(io.ComfyNode):
                 io.Image.Output(display_name="images"),
                 io.Audio.Output(display_name="audio"),
                 io.Float.Output(display_name="fps"),
+                io.Int.Output(display_name="bit_depth"),
             ],
         )
 
     @classmethod
     def execute(cls, video: Input.Video) -> io.NodeOutput:
         components = video.get_components()
-        return io.NodeOutput(components.images, components.audio, float(components.frame_rate))
+        return io.NodeOutput(components.images, components.audio, float(components.frame_rate), video.get_bit_depth())
 
 
 class LoadVideo(io.ComfyNode):
