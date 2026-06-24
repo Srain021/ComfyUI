@@ -19,3 +19,11 @@ def test_health_payload_names_core_capabilities():
     assert "custom_node.manage" in payload["capabilities"]
     assert "service.compose" in payload["capabilities"]
     assert payload["sudo_policy"] == "print_only"
+
+
+def test_frontend_loads_stylesheet_without_css_module_import():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+
+    assert 'import "./agent-workbench.css";' not in script
+    assert "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css" in script
+    assert 'document.createElement("link")' in script

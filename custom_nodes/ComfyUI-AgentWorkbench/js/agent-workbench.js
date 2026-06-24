@@ -1,7 +1,20 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-import "./agent-workbench.css";
+const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
+const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
+
+function loadWorkbenchStylesheet() {
+  if (document.getElementById(WORKBENCH_STYLESHEET_ID)) {
+    return;
+  }
+
+  const link = document.createElement("link");
+  link.id = WORKBENCH_STYLESHEET_ID;
+  link.rel = "stylesheet";
+  link.href = WORKBENCH_STYLESHEET_HREF;
+  document.head.appendChild(link);
+}
 
 function createWorkbenchPanel() {
   const panel = document.createElement("section");
@@ -27,6 +40,7 @@ function createWorkbenchPanel() {
 app.registerExtension({
   name: "ComfyUI.AgentWorkbench",
   setup() {
+    loadWorkbenchStylesheet();
     createWorkbenchPanel();
   },
 });
