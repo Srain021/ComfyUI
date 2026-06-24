@@ -1338,6 +1338,7 @@ class List(ComfyTypeI):
     ):
         info = value[1]
         min_rows: int = info.get("min", 0)
+        max_rows: int = info.get("max", List._MaxRows)
         template: dict[str, Any] = info.get("template", {})
 
         # Collect all template field specs across required/optional sections
@@ -1363,6 +1364,10 @@ class List(ComfyTypeI):
                     except ValueError:
                         pass
 
+        if present_rows > max_rows:
+            raise ValueError(
+                f"List input '{finalized_prefix}' received {present_rows} rows but max is {max_rows}."
+            )
         row_count = max(min_rows, present_rows)
 
         for row in range(row_count):
