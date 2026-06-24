@@ -23,38 +23,117 @@ def _graph_summary(graph: dict | None) -> dict:
     }
 
 
-def _custom_nodes(root: Path) -> list[dict]:
+def _bounded_entries(directory: Path, remaining_entries: int) -> tuple[list[Path], int, bool]:
+    if remaining_entries <= 0:
+        return [], 0, True
+    try:
+        iterator = directory.iterdir()
+    except OSError:
+        return [], 0, False
+
+    rows = []
+    while len(rows) < remaining_entries:
+        try:
+            rows.append(next(iterator))
+        except StopIteration:
+            return rows, len(rows), False
+        except OSError:
+            return rows, len(rows), False
+    return rows, len(rows), True
+
+
+def _custom_node_row(root: Path, child: Path, state: str, name: str | None = None) -> dict | None:
+    try:
+        is_dir = child.is_dir()
+        is_file = child.is_file()
+    except OSError:
+        return None
+    if not is_dir and (child.suffix != ".py" or not is_file):
+        return None
+    try:
+        path = str(child.relative_to(root))
+    except ValueError:
+        return None
+    return {
+        "name": (name or child.name).removesuffix(".disabled"),
+        "path": path,
+        "state": state,
+    }
+
+
+def _custom_nodes(
+    root: Path,
+    max_custom_nodes: int,
+    max_custom_node_scan_entries: int,
+) -> tuple[list[dict], bool]:
     custom_nodes_dir = root / "custom_nodes"
     try:
         if not custom_nodes_dir.is_dir():
-            return []
-        children = list(custom_nodes_dir.iterdir())
+            return [], False
     except OSError:
-        return []
+        return [], False
 
     rows = []
+    visited_entries = 0
+    scan_limit_reached = False
+    response_limit_reached = False
+
+    children, visited, truncated = _bounded_entries(
+        custom_nodes_dir,
+        max_custom_node_scan_entries - visited_entries,
+    )
+    visited_entries += visited
+    scan_limit_reached = scan_limit_reached or truncated
+
     for child in sorted(children, key=lambda path: path.name.lower()):
+        if child.name == ".disabled":
+            try:
+                is_disabled_dir = child.is_dir()
+            except OSError:
+                is_disabled_dir = False
+            if not is_disabled_dir:
+                continue
+            disabled_children, visited, truncated = _bounded_entries(
+                child,
+                max_custom_node_scan_entries - visited_entries,
+            )
+            visited_entries += visited
+            scan_limit_reached = scan_limit_reached or truncated
+            for disabled_child in sorted(disabled_children, key=lambda path: path.name.lower()):
+                if disabled_child.name.startswith("__") or disabled_child.name.startswith("."):
+                    continue
+                row = _custom_node_row(
+                    root,
+                    disabled_child,
+                    state="disabled",
+                    name=disabled_child.name,
+                )
+                if row is None:
+                    continue
+                rows.append(row)
+                if len(rows) > max_custom_nodes:
+                    response_limit_reached = True
+                    break
+            if response_limit_reached:
+                break
+            continue
+
         if child.name.startswith("__") or child.name.startswith("."):
             continue
-        try:
-            is_dir = child.is_dir()
-            is_file = child.is_file()
-        except OSError:
-            continue
-        if not is_dir and (child.suffix != ".py" or not is_file):
-            continue
-        try:
-            path = str(child.relative_to(root))
-        except ValueError:
-            continue
-        rows.append(
-            {
-                "name": child.name.removesuffix(".disabled"),
-                "path": path,
-                "state": "disabled" if child.name.endswith(".disabled") else "enabled",
-            }
+        row = _custom_node_row(
+            root,
+            child,
+            state="disabled" if child.name.endswith(".disabled") else "enabled",
         )
-    return rows
+        if row is None:
+            continue
+        rows.append(row)
+        if len(rows) > max_custom_nodes:
+            response_limit_reached = True
+            break
+
+    rows = sorted(rows, key=lambda row: (row["name"].lower(), row["path"].lower()))
+    return rows[:max_custom_nodes], scan_limit_reached or response_limit_reached
 
 
 def _workflow_rows(
@@ -131,12 +210,23 @@ def collect_context(
     graph: dict | None = None,
     max_workflows: int = 50,
     max_workflow_scan_entries: int | None = None,
+    max_custom_nodes: int = 100,
+    max_custom_node_scan_entries: int | None = None,
 ) -> dict:
     max_workflows = max(0, max_workflows)
     if max_workflow_scan_entries is None:
         max_workflow_scan_entries = max(500, max_workflows * 10)
     max_workflow_scan_entries = max(0, max_workflow_scan_entries)
-    workflows, truncated = _workflow_rows(
+    max_custom_nodes = max(0, max_custom_nodes)
+    if max_custom_node_scan_entries is None:
+        max_custom_node_scan_entries = 500
+    max_custom_node_scan_entries = max(0, max_custom_node_scan_entries)
+    custom_nodes, custom_nodes_truncated = _custom_nodes(
+        root,
+        max_custom_nodes=max_custom_nodes,
+        max_custom_node_scan_entries=max_custom_node_scan_entries,
+    )
+    workflows, workflows_truncated = _workflow_rows(
         root,
         max_workflows=max_workflows,
         max_workflow_scan_entries=max_workflow_scan_entries,
@@ -144,7 +234,8 @@ def collect_context(
     return {
         "root": str(root),
         "graph": _graph_summary(graph),
-        "custom_nodes": _custom_nodes(root),
+        "custom_nodes": custom_nodes,
+        "custom_nodes_truncated": custom_nodes_truncated,
         "workflows": workflows,
-        "workflows_truncated": truncated,
+        "workflows_truncated": workflows_truncated,
     }

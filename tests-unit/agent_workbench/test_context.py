@@ -1,12 +1,17 @@
 import asyncio
+import json
 import sys
+import types
 from pathlib import Path
+
+from aiohttp import web
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
+from agent_workbench import routes as agent_routes
 from agent_workbench.context import collect_context
 from agent_workbench.routes import _json_request
 
@@ -31,6 +36,60 @@ def test_collect_context_bounds_workflows_and_custom_nodes(tmp_path):
     assert context["custom_nodes"][1]["state"] == "disabled"
     assert len(context["workflows"]) == 2
     assert context["workflows_truncated"] is True
+    assert context["custom_nodes_truncated"] is False
+
+
+def test_collect_context_reports_disabled_node_forms_and_skips_hidden_entries(tmp_path):
+    custom_nodes = tmp_path / "custom_nodes"
+    (custom_nodes / "EnabledNode").mkdir(parents=True)
+    (custom_nodes / "NodeB.disabled").mkdir()
+    (custom_nodes / ".disabled" / "ManagerDisabled").mkdir(parents=True)
+    (custom_nodes / ".hidden").mkdir()
+    (custom_nodes / "__pycache__").mkdir()
+
+    context = collect_context(tmp_path)
+    rows = {row["name"]: row for row in context["custom_nodes"]}
+
+    assert rows["EnabledNode"]["state"] == "enabled"
+    assert rows["NodeB"]["state"] == "disabled"
+    assert rows["ManagerDisabled"]["state"] == "disabled"
+    assert rows["ManagerDisabled"]["path"] == "custom_nodes/.disabled/ManagerDisabled"
+    assert ".hidden" not in rows
+    assert "__pycache__" not in rows
+    assert context["custom_nodes_truncated"] is False
+
+
+def test_collect_context_bounds_custom_node_response(tmp_path):
+    custom_nodes = tmp_path / "custom_nodes"
+    custom_nodes.mkdir(parents=True)
+    for index in range(5):
+        (custom_nodes / f"Node{index}").mkdir()
+
+    context = collect_context(
+        tmp_path,
+        max_custom_nodes=2,
+        max_custom_node_scan_entries=10,
+    )
+
+    assert len(context["custom_nodes"]) == 2
+    assert context["custom_nodes_truncated"] is True
+
+
+def test_collect_context_counts_non_node_entries_toward_custom_node_scan_limit(tmp_path):
+    custom_nodes = tmp_path / "custom_nodes"
+    custom_nodes.mkdir(parents=True)
+    for index in range(8):
+        (custom_nodes / f"aaa-{index}.txt").write_text("noise", encoding="utf-8")
+    (custom_nodes / "zzzNode").mkdir()
+
+    context = collect_context(
+        tmp_path,
+        max_custom_nodes=10,
+        max_custom_node_scan_entries=3,
+    )
+
+    assert context["custom_nodes"] == []
+    assert context["custom_nodes_truncated"] is True
 
 
 def test_collect_context_tolerates_malformed_graph_shapes(tmp_path):
@@ -115,3 +174,42 @@ def test_json_request_normalizes_invalid_and_non_object_bodies():
     assert asyncio.run(_json_request(_FakeRequest(decoded_body=["not", "dict"]))) == {}
     assert asyncio.run(_json_request(_FakeRequest(error=ValueError("bad json")))) == {}
     assert asyncio.run(_json_request(_FakeRequest(can_read_body=False))) == {}
+
+
+def test_register_routes_adds_agent_context_post_route():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        matches = [
+            route
+            for route in app.router.routes()
+            if route.method == "POST" and route.resource.canonical == "/agent/context"
+        ]
+
+        assert len(matches) == 1
+        response = asyncio.run(
+            matches[0].handler(
+                _FakeRequest(decoded_body={"graph": {"nodes": [{"id": 1}]}})
+            )
+        )
+        payload = json.loads(response.text)
+        assert payload["graph"]["node_count"] == 1
+        assert "custom_nodes" in payload
+        assert "custom_nodes_truncated" in payload
+
+        malformed_response = asyncio.run(
+            matches[0].handler(_FakeRequest(decoded_body=["not", "a", "dict"]))
+        )
+        malformed_payload = json.loads(malformed_response.text)
+        assert malformed_payload["graph"] == {
+            "node_count": 0,
+            "link_count": 0,
+            "selected_node_ids": [],
+        }
+    finally:
+        agent_routes._REGISTERED = False
