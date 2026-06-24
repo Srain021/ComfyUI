@@ -26,13 +26,17 @@ ACTION_REGISTRY = {
 }
 
 
-def _normalize_action(action: dict) -> dict:
+def _normalize_action(action: object, index: int) -> dict:
+    if not isinstance(action, dict):
+        raise PlanValidationError(f"Action {index} must be an object")
     action_type = action.get("type")
+    if not isinstance(action_type, str):
+        raise PlanValidationError(f"Action {index} type must be a string")
     if action_type not in ACTION_REGISTRY:
-        raise PlanValidationError(f"Unsupported action type: {action_type}")
+        raise PlanValidationError(f"Unsupported action type: {action_type} (action {index})")
     payload = action.get("payload", {})
     if not isinstance(payload, dict):
-        raise PlanValidationError(f"Action payload must be an object: {action_type}")
+        raise PlanValidationError(f"Action {index} payload must be an object: {action_type}")
     capability, risk = ACTION_REGISTRY[action_type]
     return {
         "type": action_type,
@@ -52,7 +56,7 @@ def validate_plan(raw: dict) -> dict:
     if not isinstance(raw_actions, list) or not raw_actions:
         raise PlanValidationError("Plan actions must be a non-empty list")
 
-    actions = [_normalize_action(action) for action in raw_actions]
+    actions = [_normalize_action(action, index) for index, action in enumerate(raw_actions)]
     risk_level = "read"
     capabilities = []
     for action in actions:
