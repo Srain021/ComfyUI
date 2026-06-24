@@ -10,9 +10,15 @@ _REGISTERED = False
 
 
 async def _json_request(request) -> dict:
-    if request.can_read_body:
-        return await request.json()
-    return {}
+    if not getattr(request, "can_read_body", False):
+        return {}
+    try:
+        body = await request.json()
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    return body
 
 
 def register_routes(prompt_server=None) -> None:
