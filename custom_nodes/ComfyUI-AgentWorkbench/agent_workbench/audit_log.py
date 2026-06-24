@@ -13,6 +13,8 @@ def append_audit_event(log_path: Path, event: dict) -> dict:
 
 
 def read_recent_events(log_path: Path, limit: int = 50) -> list[dict]:
+    if limit <= 0:
+        return []
     if not log_path.exists():
         return []
     lines = log_path.read_text(encoding="utf-8").splitlines()
