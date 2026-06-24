@@ -19,6 +19,6 @@ def build_health_payload() -> dict:
         "ok": True,
         "name": "ComfyUI Agent Workbench",
         "version": VERSION,
-        "capabilities": CORE_CAPABILITIES,
+        "capabilities": list(CORE_CAPABILITIES),
         "sudo_policy": "print_only",
     }

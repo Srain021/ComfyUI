@@ -17,6 +17,10 @@ function loadWorkbenchStylesheet() {
 }
 
 function createWorkbenchPanel() {
+  if (document.getElementById("agent-workbench-panel")) {
+    return;
+  }
+
   const panel = document.createElement("section");
   panel.id = "agent-workbench-panel";
   panel.innerHTML = `
