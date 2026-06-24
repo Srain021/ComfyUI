@@ -73,6 +73,19 @@ def test_collect_context_bounds_workflow_scan_effort(tmp_path):
     assert context["workflows_truncated"] is True
 
 
+def test_collect_context_counts_non_json_entries_toward_scan_limit(tmp_path):
+    workflows = tmp_path / "user" / "default" / "workflows"
+    workflows.mkdir(parents=True)
+    for index in range(8):
+        (workflows / f"aaa-{index}.txt").write_text("noise", encoding="utf-8")
+    (workflows / "zzz-workflow.json").write_text("{}", encoding="utf-8")
+
+    context = collect_context(tmp_path, max_workflows=5, max_workflow_scan_entries=3)
+
+    assert context["workflows"] == []
+    assert context["workflows_truncated"] is True
+
+
 def test_collect_context_skips_workflow_stat_failures(tmp_path):
     workflows = tmp_path / "user" / "default" / "workflows"
     workflows.mkdir(parents=True)

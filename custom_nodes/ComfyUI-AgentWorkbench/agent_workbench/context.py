@@ -70,33 +70,60 @@ def _workflow_rows(
         return [], False
 
     rows = []
-    scanned = 0
+    visited_entries = 0
     scan_limit_reached = False
-    iterator = workflows_dir.rglob("*.json")
-    while True:
-        if scanned >= max_workflow_scan_entries:
-            scan_limit_reached = True
-            break
+    workflow_limit_reached = False
+    pending_dirs = [workflows_dir]
+    pending_index = 0
+    while pending_index < len(pending_dirs):
+        directory = pending_dirs[pending_index]
+        pending_index += 1
         try:
-            path = next(iterator)
-        except StopIteration:
-            break
+            iterator = directory.iterdir()
         except OSError:
-            break
-        scanned += 1
-        try:
-            if not path.is_file():
-                continue
-            rows.append(
-                {"path": str(path.relative_to(root)), "bytes": path.stat().st_size}
-            )
-        except (OSError, ValueError):
             continue
-        if len(rows) > max_workflows:
+
+        children = []
+        while True:
+            if visited_entries >= max_workflow_scan_entries:
+                scan_limit_reached = True
+                break
+            try:
+                child = next(iterator)
+            except StopIteration:
+                break
+            except OSError:
+                break
+            visited_entries += 1
+            children.append(child)
+
+        for child in sorted(children, key=lambda path: path.name.lower()):
+            try:
+                is_symlink = child.is_symlink()
+                is_dir = child.is_dir() if not is_symlink else False
+                is_file = child.is_file()
+            except OSError:
+                continue
+            if is_dir:
+                pending_dirs.append(child)
+                continue
+            if not is_file or child.suffix != ".json":
+                continue
+            try:
+                rows.append(
+                    {"path": str(child.relative_to(root)), "bytes": child.stat().st_size}
+                )
+            except (OSError, ValueError):
+                continue
+            if len(rows) > max_workflows:
+                workflow_limit_reached = True
+                break
+
+        if scan_limit_reached or workflow_limit_reached:
             break
 
     rows = sorted(rows, key=lambda row: row["path"].lower())
-    return rows[:max_workflows], scan_limit_reached or len(rows) > max_workflows
+    return rows[:max_workflows], scan_limit_reached or workflow_limit_reached
 
 
 def collect_context(
