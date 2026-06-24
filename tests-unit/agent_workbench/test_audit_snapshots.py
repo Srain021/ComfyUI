@@ -63,7 +63,13 @@ def test_snapshot_file_creates_distinct_files_for_same_target_reason_and_timesta
         def now(cls, tz=None):
             return datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
+    class FrozenUuid:
+        def __init__(self, hex_value):
+            self.hex = hex_value
+
     monkeypatch.setattr(snapshot_module, "datetime", FrozenDatetime)
+    uuids = iter([FrozenUuid("aaaabbbbccccdddd"), FrozenUuid("1111222233334444")])
+    monkeypatch.setattr(snapshot_module, "uuid4", lambda: next(uuids))
     target = tmp_path / "workflow.json"
     backup_dir = tmp_path / "backups"
 
@@ -77,6 +83,8 @@ def test_snapshot_file_creates_distinct_files_for_same_target_reason_and_timesta
     assert second.is_file()
     assert first.read_text(encoding="utf-8") == '{"version": 1}'
     assert second.read_text(encoding="utf-8") == '{"version": 2}'
+    assert first.name.endswith(".aaaabbbb.bak")
+    assert second.name.endswith(".11112222.bak")
 
 
 def test_snapshot_file_rejects_directory_targets(tmp_path):
@@ -85,3 +93,28 @@ def test_snapshot_file_rejects_directory_targets(tmp_path):
 
     with pytest.raises(IsADirectoryError):
         snapshot_file(target, tmp_path / "backups", reason="workflow-save")
+
+
+def test_snapshot_file_rejects_missing_targets(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        snapshot_file(tmp_path / "missing-workflow.json", tmp_path / "backups", reason="workflow-save")
+
+
+def test_restore_snapshot_rejects_directory_target_without_copying_into_it(tmp_path):
+    snapshot = tmp_path / "workflow.json.bak"
+    snapshot.write_text('{"old": true}', encoding="utf-8")
+    target = tmp_path / "workflow-dir"
+    target.mkdir()
+
+    with pytest.raises(IsADirectoryError):
+        restore_snapshot(snapshot, target)
+
+    assert not (target / snapshot.name).exists()
+
+
+def test_restore_snapshot_rejects_directory_snapshots(tmp_path):
+    snapshot = tmp_path / "snapshot-dir"
+    snapshot.mkdir()
+
+    with pytest.raises(IsADirectoryError):
+        restore_snapshot(snapshot, tmp_path / "workflow.json")

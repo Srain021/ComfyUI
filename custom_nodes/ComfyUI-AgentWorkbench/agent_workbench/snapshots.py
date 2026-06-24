@@ -18,7 +18,11 @@ def snapshot_file(target: Path, backup_dir: Path, reason: str) -> Path:
 
 
 def restore_snapshot(snapshot: Path, target: Path) -> None:
-    if not snapshot.exists():
+    if not snapshot.is_file():
+        if snapshot.exists():
+            raise IsADirectoryError(str(snapshot))
         raise FileNotFoundError(str(snapshot))
+    if target.is_dir():
+        raise IsADirectoryError(str(target))
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(snapshot, target)
