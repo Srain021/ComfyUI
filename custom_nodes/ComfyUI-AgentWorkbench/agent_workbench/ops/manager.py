@@ -69,11 +69,17 @@ def manager_request_for_action(action: dict) -> dict:
         node = _manager_node_payload(payload)
         node["skip_post_install"] = True
         return {"method": "POST", "path": "/manager/queue/install", "json": node}
-    if action_type in {"custom_node.update", "custom_node.reinstall", "custom_node.fix"}:
+    if action_type in {
+        "custom_node.update",
+        "custom_node.reinstall",
+        "custom_node.fix",
+        "custom_node.uninstall",
+    }:
         path = {
             "custom_node.update": "/manager/queue/update",
             "custom_node.reinstall": "/manager/queue/reinstall",
             "custom_node.fix": "/manager/queue/fix",
+            "custom_node.uninstall": "/manager/queue/uninstall",
         }[action_type]
         return {"method": "POST", "path": path, "json": _manager_node_payload(payload)}
     if action_type == "custom_node.update_all":

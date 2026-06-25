@@ -77,6 +77,16 @@ def test_manager_fix_request_uses_queue_fix():
     assert request["json"]["files"] == ["ComfyUI-BrokenNode"]
 
 
+def test_manager_uninstall_request_uses_queue_uninstall():
+    request = manager_request_for_action(
+        {"type": "custom_node.uninstall", "payload": {"id": "ComfyUI-TestNode"}}
+    )
+
+    assert request["path"] == "/manager/queue/uninstall"
+    assert request["json"]["id"] == "ComfyUI-TestNode"
+    assert request["json"]["files"] == ["ComfyUI-TestNode"]
+
+
 def test_manager_update_all_request_uses_default_mode():
     request = manager_request_for_action(
         {"type": "custom_node.update_all", "payload": {}}

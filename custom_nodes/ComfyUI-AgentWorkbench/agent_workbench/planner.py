@@ -2109,7 +2109,7 @@ def _extract_custom_node_id(text: str) -> str | None:
     if match:
         return match.group(1).rstrip(".,，。")
     match = re.search(
-        r"(?:安装|禁用|启用|更新|升级|重装|重新安装|修复|install|disable|enable|update|reinstall|fix)?\s*"
+        r"(?:安装|禁用|启用|更新|升级|重装|重新安装|修复|卸载|移除|删除|install|disable|enable|update|reinstall|fix|uninstall|remove|delete)?\s*"
         r"([A-Za-z0-9_.:/-]+)\s*(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)",
         text,
         re.IGNORECASE,
@@ -2141,6 +2141,8 @@ def _plan_custom_node_manager_action(text: str) -> dict | None:
         action_type = "custom_node.reinstall"
     elif any(term in lowered or term in text for term in ("fix", "修复", "repair")):
         action_type = "custom_node.fix"
+    elif any(term in lowered or term in text for term in ("uninstall", "remove", "卸载", "移除")):
+        action_type = "custom_node.uninstall"
     elif any(term in lowered or term in text for term in ("update", "更新", "升级")):
         action_type = "custom_node.update"
 

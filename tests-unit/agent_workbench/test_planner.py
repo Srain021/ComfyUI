@@ -3217,6 +3217,19 @@ def test_rule_planner_plans_extension_enable_then_restart_when_id_precedes_marke
     ]
 
 
+def test_rule_planner_plans_custom_node_uninstall_and_plugin_remove():
+    uninstall_plan = RuleBasedPlanner().plan("卸载 custom node ComfyUI-TestNode", context={})
+    remove_plan = RuleBasedPlanner().plan("移除 ComfyUI-OldNode 插件然后重启 ComfyUI", context={})
+
+    assert uninstall_plan["actions"] == [
+        {"type": "custom_node.uninstall", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+    assert remove_plan["actions"] == [
+        {"type": "custom_node.uninstall", "payload": {"id": "ComfyUI-OldNode"}},
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
 def test_rule_planner_plans_custom_node_update_reinstall_and_fix():
     update_plan = RuleBasedPlanner().plan("更新 custom node ComfyUI-TestNode", context={})
     reinstall_plan = RuleBasedPlanner().plan("重装 custom node ComfyUI-TestNode", context={})

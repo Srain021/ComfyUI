@@ -257,6 +257,29 @@ def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_pa
     assert executor.manager_requests[0]["body"] == "https://example.com/node.git"
 
 
+def test_custom_node_uninstall_apply_returns_manager_queue_request(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Uninstall node",
+            "actions": [{"type": "custom_node.uninstall", "payload": {"id": "ComfyUI-TestNode"}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"]["path"] == "/manager/queue/uninstall"
+    assert executor.manager_requests[0]["json"]["id"] == "ComfyUI-TestNode"
+
+
 def test_service_restart_after_manager_request_is_deferred_until_frontend_completes(tmp_path):
     dry_run = dry_run_plan(
         {
