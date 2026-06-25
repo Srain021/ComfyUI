@@ -1254,6 +1254,16 @@ def _find_node_for_phrase(nodes: list[dict], phrase: str) -> dict | None:
     by_id = _find_node_by_id(nodes, _extract_node_id(cleaned))
     if by_id is not None:
         return by_id
+    if _message_mentions_current_node(cleaned):
+        selected = _selected_nodes(nodes)
+        if len(selected) == 1:
+            return selected[0]
+    semantic = _find_node_by_semantic_label(nodes, cleaned)
+    if semantic is not None:
+        return semantic
+    labelled = _find_node_by_label(nodes, cleaned)
+    if labelled is not None:
+        return labelled
     lowered = cleaned.lower()
     matches = []
     for node in nodes:
@@ -1332,7 +1342,7 @@ def _plan_graph_connect(text: str, context: dict) -> dict | None:
         return None
     nodes = _graph_nodes(context)
     slot_patterns = (
-        r"把\s+(.+?)\s+的\s+([A-Za-z0-9_ -]+)\s*(?:连接到|连到|接到)\s+(.+?)\s+的\s+([A-Za-z0-9_ -]+)$",
+        r"把\s*(.+?)\s*的\s*([A-Za-z0-9_ -]+)\s*(?:连接到|连到|接到)\s*(.+?)\s*的\s*([A-Za-z0-9_ -]+)$",
         r"\bconnect\s+(.+?)\s+([A-Za-z0-9_ -]+)\s+(?:to|into)\s+(.+?)\s+([A-Za-z0-9_ -]+)$",
     )
     for pattern in slot_patterns:
