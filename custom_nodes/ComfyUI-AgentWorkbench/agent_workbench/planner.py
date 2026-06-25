@@ -1203,11 +1203,48 @@ def _disconnect_pair_plan(nodes: list[dict], origin_phrase: str, target_phrase: 
     }
 
 
+def _disconnect_all_plan(nodes: list[dict], node_phrase: str, scope: str) -> dict | None:
+    node = _select_node(nodes, node_phrase)
+    if node is None:
+        node = _find_node_for_phrase(nodes, node_phrase)
+    if node is None:
+        return None
+    payload_key = {
+        "inputs": "target_node_id",
+        "outputs": "origin_node_id",
+        "all": "node_id",
+    }[scope]
+    return {
+        "summary": f"Disconnect {scope} on node {node.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {payload_key: node.get("id")},
+            }
+        ],
+    }
+
+
 def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("断开", "清空", "移除连接", "disconnect")):
         return None
     nodes = _graph_nodes(context)
+    all_patterns = (
+        (r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*所有\s*(?:输入|inputs?)$", "inputs"),
+        (r"\bdisconnect\s+all\s+inputs?\s+(?:on|from)\s+(.+?)$", "inputs"),
+        (r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*所有\s*(?:输出|outputs?)$", "outputs"),
+        (r"\bdisconnect\s+all\s+outputs?\s+(?:on|from)\s+(.+?)$", "outputs"),
+        (r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*所有\s*(?:连接|links?|connections?)$", "all"),
+        (r"\bdisconnect\s+all\s+(?:links?|connections?)\s+(?:on|from)\s+(.+?)$", "all"),
+    )
+    for pattern, scope in all_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _disconnect_all_plan(nodes, match.group(1), scope)
+        if plan is not None:
+            return plan
     pair_patterns = (
         r"(?:断开|移除连接)\s*(.+?)\s*(?:到|和|与|->|to)\s*(.+?)\s*的?连接?$",
         r"\bdisconnect\s+(.+?)\s+(?:from|to)\s+(.+?)$",

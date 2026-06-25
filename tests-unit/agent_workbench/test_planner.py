@@ -1366,6 +1366,71 @@ def test_rule_planner_disconnects_nodes_by_title_pair():
     ]
 
 
+def test_rule_planner_disconnects_all_inputs_on_selected_node():
+    plan = RuleBasedPlanner().plan(
+        "断开这个节点的所有输入",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 2, "type": "KSampler", "title": "KSampler", "selected": True}
+                ],
+                "links": [
+                    {"id": 77, "origin_id": 1, "origin_slot": 0, "target_id": 2, "target_slot": 0},
+                    {"id": 78, "origin_id": 3, "origin_slot": 0, "target_id": 2, "target_slot": 1},
+                    {"id": 79, "origin_id": 2, "origin_slot": 0, "target_id": 4, "target_slot": 0},
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.disconnect", "payload": {"target_node_id": 2}}
+    ]
+
+
+def test_rule_planner_disconnects_all_outputs_on_node_by_title():
+    plan = RuleBasedPlanner().plan(
+        "断开 KSampler 的所有输出",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 2, "type": "KSampler", "title": "KSampler"},
+                    {"id": 4, "type": "VAEDecode", "title": "Decode"},
+                ],
+                "links": [
+                    {"id": 77, "origin_id": 1, "origin_slot": 0, "target_id": 2, "target_slot": 0},
+                    {"id": 79, "origin_id": 2, "origin_slot": 0, "target_id": 4, "target_slot": 0},
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.disconnect", "payload": {"origin_node_id": 2}}
+    ]
+
+
+def test_rule_planner_disconnects_all_links_on_selected_node():
+    plan = RuleBasedPlanner().plan(
+        "断开这个节点的所有连接",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 2, "type": "KSampler", "title": "KSampler", "selected": True}
+                ],
+                "links": [
+                    {"id": 77, "origin_id": 1, "origin_slot": 0, "target_id": 2, "target_slot": 0},
+                    {"id": 79, "origin_id": 2, "origin_slot": 0, "target_id": 4, "target_slot": 0},
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.disconnect", "payload": {"node_id": 2}}
+    ]
+
+
 def test_rule_planner_plans_restart_container():
     plan = RuleBasedPlanner().plan("重启 ComfyUI 容器", context={})
 

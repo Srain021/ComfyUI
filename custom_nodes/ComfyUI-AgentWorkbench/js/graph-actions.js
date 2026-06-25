@@ -36,6 +36,27 @@ function matchingLinks(graph, payload) {
   ));
 }
 
+function disconnectGraphLinks(graph, links) {
+  if (!links.length) {
+    throw new Error("No matching graph links to disconnect");
+  }
+  const rows = links.map((link) => {
+    const target = requireNode(graph, link.target_id);
+    if (typeof target.disconnectInput !== "function") {
+      throw new Error("Target node cannot disconnect inputs");
+    }
+    target.disconnectInput(link.target_slot);
+    return {
+      origin_node_id: link.origin_id,
+      origin_slot: link.origin_slot,
+      target_node_id: target.id,
+      target_slot: link.target_slot,
+    };
+  });
+  markGraphDirty(graph);
+  return rows;
+}
+
 function resolveSlot(slots, value, label) {
   if (value === undefined || value === null) {
     return 0;
@@ -247,21 +268,20 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.disconnect") {
     const graph = currentGraph();
+    if (action.payload.node_id !== undefined) {
+      const node = requireNode(graph, action.payload.node_id);
+      const links = graphLinks(graph).filter((link) => (
+        String(link.origin_id) === String(node.id) || String(link.target_id) === String(node.id)
+      ));
+      return { type: action.type, links: disconnectGraphLinks(graph, links) };
+    }
     if (action.payload.origin_node_id !== undefined) {
       const links = matchingLinks(graph, action.payload);
-      if (!links.length) {
-        throw new Error("No matching graph links to disconnect");
-      }
-      const rows = links.map((link) => {
-        const target = requireNode(graph, link.target_id);
-        if (typeof target.disconnectInput !== "function") {
-          throw new Error("Target node cannot disconnect inputs");
-        }
-        target.disconnectInput(link.target_slot);
-        return { target_node_id: target.id, target_slot: link.target_slot };
-      });
-      markGraphDirty(graph);
-      return { type: action.type, links: rows };
+      return { type: action.type, links: disconnectGraphLinks(graph, links) };
+    }
+    if (action.payload.target_node_id !== undefined && action.payload.target_slot === undefined) {
+      const links = matchingLinks(graph, action.payload);
+      return { type: action.type, links: disconnectGraphLinks(graph, links) };
     }
     const target = requireNode(graph, action.payload.target_node_id);
     const targetSlot = resolveSlot(target.inputs, action.payload.target_slot, "Target");

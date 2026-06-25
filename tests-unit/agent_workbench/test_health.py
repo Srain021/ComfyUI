@@ -160,6 +160,9 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert ".centerOnNode(" in graph_actions
     assert ".connect(" in graph_actions
     assert ".disconnectInput(" in graph_actions
+    assert "disconnectGraphLinks(" in graph_actions
+    assert "action.payload.node_id" in graph_actions
+    assert "action.payload.target_slot === undefined" in graph_actions
     assert "matchingLinks(" in graph_actions
     assert "graph.remove(node)" in graph_actions
     assert "cloneGraphNode(" in graph_actions
