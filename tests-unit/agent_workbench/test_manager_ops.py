@@ -99,6 +99,38 @@ def test_manager_enable_request_skips_post_install():
     assert request["json"]["skip_post_install"] is True
 
 
+def test_manager_queue_install_request_uses_node_payload():
+    request = manager_request_for_action(
+        {
+            "type": "custom_node.install",
+            "payload": {
+                "method": "manager_queue",
+                "node": {
+                    "id": "ComfyUI-Impact-Pack",
+                    "version": "unknown",
+                    "ui_id": "ComfyUI-Impact-Pack",
+                    "files": ["ComfyUI-Impact-Pack"],
+                    "channel": "default",
+                    "mode": "cache",
+                },
+            },
+        }
+    )
+
+    assert request == {
+        "method": "POST",
+        "path": "/manager/queue/install",
+        "json": {
+            "id": "ComfyUI-Impact-Pack",
+            "version": "unknown",
+            "ui_id": "ComfyUI-Impact-Pack",
+            "files": ["ComfyUI-Impact-Pack"],
+            "channel": "default",
+            "mode": "cache",
+        },
+    }
+
+
 def test_manager_rejects_invalid_git_url():
     with pytest.raises(ManagerActionError, match="http or https"):
         manager_request_for_action(

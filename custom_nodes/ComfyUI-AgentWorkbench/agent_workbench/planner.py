@@ -1785,6 +1785,35 @@ def _plan_custom_node_install_from_url(text: str) -> dict | None:
     }
 
 
+def _manager_queue_node_payload(node_id: str) -> dict:
+    return {
+        "id": node_id,
+        "version": "unknown",
+        "ui_id": node_id,
+        "files": [node_id],
+        "channel": "default",
+        "mode": "cache",
+    }
+
+
+def _plan_custom_node_install_by_id(text: str) -> dict | None:
+    lowered = text.lower()
+    if not (_mentions_custom_node(text) and any(term in lowered or term in text for term in ("install", "安装"))):
+        return None
+    node_id = _extract_custom_node_id(text)
+    if not node_id:
+        return None
+    return {
+        "summary": f"Install custom node {node_id} through ComfyUI-Manager",
+        "actions": [
+            {
+                "type": "custom_node.install",
+                "payload": {"method": "manager_queue", "node": _manager_queue_node_payload(node_id)},
+            }
+        ],
+    }
+
+
 def _plan_custom_node_state_action(text: str) -> dict | None:
     lowered = text.lower()
     if not (_mentions_custom_node(text) or "节点" in text):
@@ -1810,6 +1839,7 @@ def _plan_custom_node_action(text: str) -> dict | None:
     for planner in (
         _plan_custom_node_manager_action,
         _plan_custom_node_install_from_url,
+        _plan_custom_node_install_by_id,
         _plan_custom_node_state_action,
     ):
         plan = planner(text)
