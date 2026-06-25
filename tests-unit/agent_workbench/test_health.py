@@ -111,6 +111,7 @@ def test_frontend_graph_snapshot_includes_slots_for_connection_planning():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 
     assert "slotRows" in script
+    assert "mode: node.mode" in script
     assert "inputs: slotRows(node.inputs)" in script
     assert "outputs: slotRows(node.outputs)" in script
     assert "type: slot.type" in script
@@ -140,8 +141,11 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert 'action.type === "graph.add_node"' in graph_actions
     assert 'action.type === "graph.connect"' in graph_actions
     assert 'action.type === "graph.delete_node"' in graph_actions
+    assert 'action.type === "graph.set_mode"' in graph_actions
     assert "app.graph.getNodeById" in graph_actions
     assert "globalThis.LiteGraph.createNode" in graph_actions
     assert ".connect(" in graph_actions
     assert "graph.remove(node)" in graph_actions
+    assert "node.mode =" in graph_actions
+    assert "globalThis.LiteGraph.BYPASS" in graph_actions
     assert "app.graph.setDirtyCanvas(true, true)" in graph_actions

@@ -20,6 +20,7 @@ ACTION_REGISTRY = {
     "graph.add_node": ("graph.edit", "canvas"),
     "graph.connect": ("graph.edit", "canvas"),
     "graph.delete_node": ("graph.edit", "canvas"),
+    "graph.set_mode": ("graph.edit", "canvas"),
     "workflow.save": ("workflow.write", "file"),
     "runtime.free_memory": ("runtime.free_memory", "runtime"),
     "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),

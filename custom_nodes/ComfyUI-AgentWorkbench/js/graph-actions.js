@@ -57,6 +57,33 @@ function setWidgetValues(node, widgets) {
     .map(([name, value]) => setWidgetValue(node, name, value).name);
 }
 
+function resolveNodeMode(mode) {
+  const liteGraph = globalThis.LiteGraph || {};
+  if (Number.isInteger(mode)) {
+    return mode;
+  }
+  if (typeof mode !== "string") {
+    throw new Error("graph.set_mode requires a mode");
+  }
+  const globalAlways = globalThis.LiteGraph && globalThis.LiteGraph.ALWAYS;
+  const globalNever = globalThis.LiteGraph && globalThis.LiteGraph.NEVER;
+  const globalBypass = globalThis.LiteGraph && globalThis.LiteGraph.BYPASS;
+  const modes = {
+    always: globalAlways ?? liteGraph.ALWAYS ?? 0,
+    enable: globalAlways ?? liteGraph.ALWAYS ?? 0,
+    enabled: globalAlways ?? liteGraph.ALWAYS ?? 0,
+    mute: globalNever ?? liteGraph.NEVER ?? 2,
+    muted: globalNever ?? liteGraph.NEVER ?? 2,
+    never: globalNever ?? liteGraph.NEVER ?? 2,
+    bypass: globalBypass ?? liteGraph.BYPASS ?? 4,
+  };
+  const resolved = modes[mode.toLowerCase()];
+  if (resolved === undefined) {
+    throw new Error(`Unsupported node mode: ${mode}`);
+  }
+  return resolved;
+}
+
 export function applyGraphAction(action) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
@@ -111,6 +138,13 @@ export function applyGraphAction(action) {
     graph.remove(node);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id };
+  }
+  if (action.type === "graph.set_mode") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    node.mode = resolveNodeMode(action.payload.mode);
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, mode: node.mode };
   }
   throw new Error(`Unsupported browser graph action: ${action.type}`);
 }

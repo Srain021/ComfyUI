@@ -223,6 +223,58 @@ def test_rule_planner_deletes_node_by_title():
     assert plan["actions"] == [{"type": "graph.delete_node", "payload": {"node_id": 9}}]
 
 
+def test_rule_planner_bypasses_selected_node():
+    plan = RuleBasedPlanner().plan(
+        "绕过这个节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "CLIPTextEncode", "title": "Prompt", "selected": True}
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_mode", "payload": {"node_id": 12, "mode": "bypass"}}
+    ]
+
+
+def test_rule_planner_mutes_node_by_title():
+    plan = RuleBasedPlanner().plan(
+        "禁用 KSampler 节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_mode", "payload": {"node_id": 9, "mode": "mute"}}
+    ]
+
+
+def test_rule_planner_enables_node_by_id():
+    plan = RuleBasedPlanner().plan(
+        "启用 12 号节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "KSampler", "title": "KSampler", "mode": 4},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_mode", "payload": {"node_id": 12, "mode": "always"}}
+    ]
+
+
 def test_rule_planner_connects_two_nodes_by_id():
     plan = RuleBasedPlanner().plan(
         "把 1 号节点连接到 2 号节点",

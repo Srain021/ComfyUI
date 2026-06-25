@@ -299,6 +299,33 @@ def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     }
 
 
+def _graph_mode_from_text(text: str) -> str | None:
+    lowered = text.lower()
+    if "custom node" in lowered or "自定义节点" in text:
+        return None
+    if any(term in lowered or term in text for term in ("取消绕过", "取消禁用", "恢复", "启用", "enable", "unmute")):
+        return "always"
+    if any(term in lowered or term in text for term in ("绕过", "旁路", "bypass")):
+        return "bypass"
+    if any(term in lowered or term in text for term in ("禁用", "停用", "mute", "disable", "关闭", "关掉")):
+        return "mute"
+    return None
+
+
+def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
+    mode = _graph_mode_from_text(text)
+    if mode is None:
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Set graph node {node.get('id')} mode to {mode}",
+        "actions": [{"type": "graph.set_mode", "payload": {"node_id": node.get("id"), "mode": mode}}],
+    }
+
+
 def _widget_name_hint_from_text(text: str) -> str | None:
     lowered = text.lower()
     for triggers, names in WIDGET_ALIASES:
@@ -530,6 +557,9 @@ class RuleBasedPlanner:
         graph_delete_plan = _plan_graph_delete_node(text, context)
         if graph_delete_plan is not None:
             return graph_delete_plan
+        graph_mode_plan = _plan_graph_set_mode(text, context)
+        if graph_mode_plan is not None:
+            return graph_mode_plan
         graph_connect_plan = _plan_graph_connect(text, context)
         if graph_connect_plan is not None:
             return graph_connect_plan
