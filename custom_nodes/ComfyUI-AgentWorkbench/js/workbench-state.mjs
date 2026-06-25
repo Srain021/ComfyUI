@@ -44,3 +44,16 @@ export function cancelDryRunState() {
     output: { ok: false, error: "user_cancelled" },
   };
 }
+
+export function applyCompletionState(result, lastDryRun, confirmChecked) {
+  if (result?.ok === true) {
+    return {
+      lastDryRun: null,
+      confirmChecked: false,
+    };
+  }
+  return {
+    lastDryRun,
+    confirmChecked,
+  };
+}

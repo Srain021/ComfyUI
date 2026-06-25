@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { applyGraphActions } from "./graph-actions.js";
 import {
+  applyCompletionState,
   buildApplyRequest,
   cancelDryRunState,
   controlStateForDryRun,
@@ -295,6 +296,10 @@ function createWorkbenchPanel() {
         result.deferred_error = error instanceof Error ? error.message : String(error);
       }
     }
+    const completion = applyCompletionState(result, lastDryRun, confirmCheckbox.checked);
+    lastDryRun = completion.lastDryRun;
+    confirmCheckbox.checked = completion.confirmChecked;
+    refreshApplyState();
     renderJson(output, result);
   });
 }

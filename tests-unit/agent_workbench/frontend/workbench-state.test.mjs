@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyCompletionState,
   buildApplyRequest,
   cancelDryRunState,
   controlStateForDryRun,
@@ -188,5 +189,45 @@ test("cancel clears dry-run state and emits cancellation output", () => {
     lastDryRun: null,
     confirmChecked: false,
     output: { ok: false, error: "user_cancelled" },
+  });
+});
+
+test("successful apply clears active plan and confirmation state", () => {
+  const dryRun = {
+    plan: {
+      summary: "Edit prompt",
+      actions: [{ type: "graph.set_widget", payload: { node_id: 7 } }],
+      requires_confirmation: false,
+      plan_hash: "canvas123",
+    },
+  };
+
+  const state = applyCompletionState({ ok: true }, dryRun, true);
+
+  assert.deepEqual(state, {
+    lastDryRun: null,
+    confirmChecked: false,
+  });
+  assert.deepEqual(controlStateForDryRun(state.lastDryRun, state.confirmChecked), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: true,
+    applyDisabled: true,
+  });
+});
+
+test("failed apply preserves active plan for retry or cancellation", () => {
+  const dryRun = {
+    plan: {
+      summary: "Restart ComfyUI",
+      actions: [{ type: "service.restart_container", payload: {} }],
+      requires_confirmation: true,
+      plan_hash: "abc123",
+    },
+  };
+
+  assert.deepEqual(applyCompletionState({ ok: false, error: "boom" }, dryRun, true), {
+    lastDryRun: dryRun,
+    confirmChecked: true,
   });
 });
