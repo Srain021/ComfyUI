@@ -30,6 +30,28 @@ def _extract_value_after_set(text: str) -> str | None:
     return None
 
 
+def _coerce_widget_value(value: str, widget: dict) -> object:
+    current = widget.get("value")
+    lowered = value.lower()
+    if isinstance(current, bool):
+        if lowered in {"true", "yes", "on", "1"} or value in {"开", "开启", "是"}:
+            return True
+        if lowered in {"false", "no", "off", "0"} or value in {"关", "关闭", "否"}:
+            return False
+        return value
+    if isinstance(current, int) and not isinstance(current, bool):
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if isinstance(current, float):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
+
 def _graph_nodes(context: dict) -> list[dict]:
     graph = context.get("graph_input") if isinstance(context, dict) else None
     if not isinstance(graph, dict):
@@ -199,11 +221,76 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
                 "payload": {
                     "node_id": node.get("id"),
                     "widget": widget["name"],
-                    "value": value,
+                    "value": _coerce_widget_value(value, widget),
                 },
             }
         ],
     }
+
+
+def _extract_node_type_to_add(text: str) -> str | None:
+    patterns = (
+        r"(?:添加|新增|创建|加)(?:一个|一個|个)?\s*([A-Za-z][A-Za-z0-9_./:-]+)\s*(?:节点|node)",
+        r"\b(?:add|create)\s+(?:a\s+|an\s+)?(?:node\s+)?([A-Za-z][A-Za-z0-9_./:-]+)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).rstrip(".,，。")
+    return None
+
+
+def _plan_graph_add_node(text: str) -> dict | None:
+    if not any(term in text.lower() or term in text for term in ("添加", "新增", "创建", "add", "create")):
+        return None
+    node_type = _extract_node_type_to_add(text)
+    if not node_type:
+        return None
+    return {
+        "summary": f"Add graph node {node_type}",
+        "actions": [{"type": "graph.add_node", "payload": {"node_type": node_type}}],
+    }
+
+
+def _graph_contains_node(nodes: list[dict], node_id: int) -> bool:
+    return any(str(node.get("id")) == str(node_id) for node in nodes)
+
+
+def _plan_graph_connect(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("连接", "连到", "接到", "connect")):
+        return None
+    patterns = (
+        r"(\d+)\s*号?\s*节点.*?(?:连接|连到|接到).*?(\d+)\s*号?\s*节点",
+        r"\bconnect\s+(?:node\s+)?(\d+)\s+(?:to|into)\s+(?:node\s+)?(\d+)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        origin_node_id = int(match.group(1))
+        target_node_id = int(match.group(2))
+        nodes = _graph_nodes(context)
+        if nodes and (
+            not _graph_contains_node(nodes, origin_node_id)
+            or not _graph_contains_node(nodes, target_node_id)
+        ):
+            return None
+        return {
+            "summary": f"Connect node {origin_node_id} to node {target_node_id}",
+            "actions": [
+                {
+                    "type": "graph.connect",
+                    "payload": {
+                        "origin_node_id": origin_node_id,
+                        "origin_slot": 0,
+                        "target_node_id": target_node_id,
+                        "target_slot": 0,
+                    },
+                }
+            ],
+        }
+    return None
 
 
 def _extract_url(text: str) -> str | None:
@@ -238,6 +325,12 @@ class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
         lowered = text.lower()
+        graph_connect_plan = _plan_graph_connect(text, context)
+        if graph_connect_plan is not None:
+            return graph_connect_plan
+        graph_add_plan = _plan_graph_add_node(text)
+        if graph_add_plan is not None:
+            return graph_add_plan
         graph_plan = _plan_graph_widget_edit(text, context)
         if graph_plan is not None:
             return graph_plan

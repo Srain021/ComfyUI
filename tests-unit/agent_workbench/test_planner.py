@@ -98,6 +98,65 @@ def test_rule_planner_sets_widget_by_node_title():
     }
 
 
+def test_rule_planner_coerces_numeric_widget_values():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的 steps 改成 28",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"][0]["payload"] == {
+        "node_id": 9,
+        "widget": "steps",
+        "value": 28,
+    }
+
+
+def test_rule_planner_adds_node_from_natural_language():
+    plan = RuleBasedPlanner().plan("添加一个 KSampler 节点", context={"graph_input": {"nodes": []}})
+
+    assert plan["actions"] == [{"type": "graph.add_node", "payload": {"node_type": "KSampler"}}]
+
+
+def test_rule_planner_connects_two_nodes_by_id():
+    plan = RuleBasedPlanner().plan(
+        "把 1 号节点连接到 2 号节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 1, "type": "CheckpointLoaderSimple", "title": "Checkpoint"},
+                    {"id": 2, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.connect",
+            "payload": {
+                "origin_node_id": 1,
+                "origin_slot": 0,
+                "target_node_id": 2,
+                "target_slot": 0,
+            },
+        }
+    ]
+
+
 def test_rule_planner_plans_restart_container():
     plan = RuleBasedPlanner().plan("重启 ComfyUI 容器", context={})
 

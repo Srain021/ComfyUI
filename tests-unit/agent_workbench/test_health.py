@@ -128,5 +128,9 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "manager_request" in script
     assert "http_request" in script
     assert 'action.type === "graph.set_widget"' in graph_actions
+    assert 'action.type === "graph.add_node"' in graph_actions
+    assert 'action.type === "graph.connect"' in graph_actions
     assert "app.graph.getNodeById" in graph_actions
+    assert "globalThis.LiteGraph.createNode" in graph_actions
+    assert ".connect(" in graph_actions
     assert "app.graph.setDirtyCanvas(true, true)" in graph_actions
