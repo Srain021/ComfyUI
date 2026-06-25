@@ -257,6 +257,69 @@ def test_rule_planner_sets_negative_prompt_by_semantic_alias():
     ]
 
 
+def test_rule_planner_copies_positive_prompt_text_to_negative_prompt():
+    plan = RuleBasedPlanner().plan(
+        "把正向提示词复制到负面提示词",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "cinematic portrait"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "blurry"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "cinematic portrait"},
+        }
+    ]
+
+
+def test_rule_planner_copies_selected_prompt_text_to_named_prompt():
+    plan = RuleBasedPlanner().plan(
+        "copy selected prompt text to Negative Prompt",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "warm rim light"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "warm rim light"},
+        }
+    ]
+
+
 def test_rule_planner_appends_text_to_positive_prompt():
     plan = RuleBasedPlanner().plan(
         "给正向提示词加上 cinematic lighting",

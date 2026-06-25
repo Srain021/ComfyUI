@@ -686,6 +686,52 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     }
 
 
+def _copy_widget_phrases(text: str) -> tuple[str, str] | None:
+    patterns = (
+        r"(?:把|将)\s*(.+?)\s*(?:复制到|拷贝到|同步到)\s*(.+)$",
+        r"(?:复制|拷贝|同步)\s*(.+?)\s*(?:到|至)\s*(.+)$",
+        r"\bcopy\s+(.+?)\s+(?:to|into)\s+(.+)$",
+        r"\bsync\s+(.+?)\s+(?:to|into)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            source = _strip_value(match.group(1))
+            target = _strip_value(match.group(2))
+            if source and target:
+                return source, target
+    return None
+
+
+def _plan_graph_copy_widget_value(text: str, context: dict) -> dict | None:
+    phrases = _copy_widget_phrases(text)
+    if phrases is None:
+        return None
+    source_phrase, target_phrase = phrases
+    nodes = _graph_nodes(context)
+    source = _select_node(nodes, source_phrase)
+    target = _select_node(nodes, target_phrase)
+    if source is None or target is None or source.get("id") == target.get("id"):
+        return None
+    source_widget = _select_widget(source, source_phrase)
+    target_widget = _select_widget(target, target_phrase)
+    if source_widget is None or target_widget is None:
+        return None
+    return {
+        "summary": f"Copy widget from node {source.get('id')} to node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": target.get("id"),
+                    "widget": target_widget["name"],
+                    "value": source_widget.get("value"),
+                },
+            }
+        ],
+    }
+
+
 def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("删除", "删掉", "移除", "delete", "remove")):
@@ -1807,6 +1853,9 @@ class RuleBasedPlanner:
         graph_delete_plan = _plan_graph_delete_node(text, context)
         if graph_delete_plan is not None:
             return graph_delete_plan
+        graph_copy_widget_plan = _plan_graph_copy_widget_value(text, context)
+        if graph_copy_widget_plan is not None:
+            return graph_copy_widget_plan
         graph_duplicate_plan = _plan_graph_duplicate_node(text, context)
         if graph_duplicate_plan is not None:
             return graph_duplicate_plan
