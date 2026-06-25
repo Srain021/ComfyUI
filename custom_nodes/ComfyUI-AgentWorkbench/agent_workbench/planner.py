@@ -171,6 +171,10 @@ NODE_LABEL_ALIASES = (
         ("vaeloader", "load vae", "vae loader"),
     ),
     (
+        ("lora", "lora 模型", "lora模型"),
+        ("loraloader", "load lora", "lora loader", "lora"),
+    ),
+    (
         ("clip skip", "clip layer", "clip 层", "clip跳层"),
         ("clipsetlastlayer", "clip set last layer"),
     ),

@@ -889,6 +889,41 @@ def test_rule_planner_sets_lora_model_strength_by_alias():
     ]
 
 
+def test_rule_planner_sets_lora_model_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 LoRA 换成 detail.safetensors",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 35,
+                        "type": "LoraLoader",
+                        "title": "Load LoRA",
+                        "widgets": [
+                            {"name": "lora_name", "value": "old.safetensors"},
+                            {"name": "strength_model", "value": 1.0},
+                            {"name": "strength_clip", "value": 1.0},
+                        ],
+                    },
+                    {
+                        "id": 36,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 35, "widget": "lora_name", "value": "detail.safetensors"},
+        }
+    ]
+
+
 def test_rule_planner_sets_video_frame_count_by_chinese_alias():
     plan = RuleBasedPlanner().plan(
         "把 WanVideo 的帧数改成 81",
