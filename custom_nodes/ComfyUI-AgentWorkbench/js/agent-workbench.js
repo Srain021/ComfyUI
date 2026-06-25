@@ -45,6 +45,8 @@ function currentGraphSnapshot() {
       type: node.type,
       title: node.title,
       mode: node.mode,
+      color: node.color,
+      bgcolor: node.bgcolor,
       pos: node.pos,
       selected: Boolean(node.selected),
       widgets: (node.widgets || []).map((widget) => ({

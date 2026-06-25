@@ -22,6 +22,7 @@ ACTION_REGISTRY = {
     "graph.disconnect": ("graph.edit", "canvas"),
     "graph.delete_node": ("graph.edit", "canvas"),
     "graph.duplicate_node": ("graph.edit", "canvas"),
+    "graph.set_color": ("graph.edit", "canvas"),
     "graph.set_mode": ("graph.edit", "canvas"),
     "graph.set_title": ("graph.edit", "canvas"),
     "graph.set_position": ("graph.edit", "canvas"),

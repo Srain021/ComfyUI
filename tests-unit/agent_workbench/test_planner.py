@@ -106,6 +106,32 @@ def test_rule_planner_fills_positive_prompt_with_natural_language():
     ]
 
 
+def test_rule_planner_does_not_treat_prompt_color_words_as_node_color():
+    plan = RuleBasedPlanner().plan(
+        "把这个 prompt 节点的文本改成 red apple",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "red apple"},
+        }
+    ]
+
+
 def test_rule_planner_sets_widget_by_node_id():
     plan = RuleBasedPlanner().plan(
         "把 12 号节点的 prompt 改成 hello world",
@@ -758,6 +784,43 @@ def test_rule_planner_duplicates_all_matching_nodes():
     assert plan["actions"] == [
         {"type": "graph.duplicate_node", "payload": {"node_id": 9, "offset": [40, 40], "select": False}},
         {"type": "graph.duplicate_node", "payload": {"node_id": 10, "offset": [40, 40], "select": False}},
+    ]
+
+
+def test_rule_planner_marks_selected_node_red():
+    plan = RuleBasedPlanner().plan(
+        "把这个节点标红",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "CLIPTextEncode", "title": "Prompt", "selected": True}
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_color", "payload": {"node_id": 12, "color": "#ff5555"}}
+    ]
+
+
+def test_rule_planner_highlights_all_matching_nodes_yellow():
+    plan = RuleBasedPlanner().plan(
+        "把所有 KSampler 节点高亮",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_color", "payload": {"node_id": 9, "color": "#f2c94c"}},
+        {"type": "graph.set_color", "payload": {"node_id": 10, "color": "#f2c94c"}},
     ]
 
 

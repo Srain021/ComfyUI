@@ -561,6 +561,87 @@ def _plan_graph_duplicate_node(text: str, context: dict) -> dict | None:
     }
 
 
+NODE_COLOR_ALIASES = (
+    (("红色", "标红", "red"), "#ff5555"),
+    (("蓝色", "标蓝", "blue"), "#4f8cff"),
+    (("绿色", "标绿", "green"), "#4caf50"),
+    (("黄色", "标黄", "yellow"), "#f2c94c"),
+    (("紫色", "标紫", "purple"), "#b084ff"),
+    (("橙色", "标橙", "orange"), "#ff9f43"),
+    (("灰色", "标灰", "gray", "grey"), "#8a8f98"),
+    (("红",), "#ff5555"),
+    (("蓝",), "#4f8cff"),
+    (("绿",), "#4caf50"),
+    (("黄",), "#f2c94c"),
+    (("紫",), "#b084ff"),
+    (("橙",), "#ff9f43"),
+    (("灰",), "#8a8f98"),
+)
+
+
+def _mentions_color_action(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered or term in text
+        for term in (
+            "颜色",
+            "高亮",
+            "标成",
+            "标为",
+            "标记",
+            "标红",
+            "标蓝",
+            "标绿",
+            "标黄",
+            "标紫",
+            "标橙",
+            "标灰",
+            "highlight",
+            "color",
+            "mark",
+        )
+    )
+
+
+def _extract_node_color(text: str) -> str | None:
+    lowered = text.lower()
+    for triggers, color in NODE_COLOR_ALIASES:
+        if any(trigger in lowered or trigger in text for trigger in triggers):
+            return color
+    if "高亮" in text or "highlight" in lowered:
+        return "#f2c94c"
+    return None
+
+
+def _set_color_action(node: dict, color: str) -> dict:
+    return {
+        "type": "graph.set_color",
+        "payload": {"node_id": node.get("id"), "color": color},
+    }
+
+
+def _plan_graph_set_color(text: str, context: dict) -> dict | None:
+    if not _mentions_color_action(text):
+        return None
+    color = _extract_node_color(text)
+    if color is None:
+        return None
+    nodes = _graph_nodes(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
+    if bulk_nodes:
+        return {
+            "summary": f"Color {len(bulk_nodes)} graph node(s)",
+            "actions": [_set_color_action(node, color) for node in bulk_nodes],
+        }
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Color graph node {node.get('id')}",
+        "actions": [_set_color_action(node, color)],
+    }
+
+
 def _graph_mode_from_text(text: str) -> str | None:
     lowered = text.lower()
     if "custom node" in lowered or "自定义节点" in text:
@@ -1221,6 +1302,9 @@ class RuleBasedPlanner:
         graph_duplicate_plan = _plan_graph_duplicate_node(text, context)
         if graph_duplicate_plan is not None:
             return graph_duplicate_plan
+        graph_color_plan = _plan_graph_set_color(text, context)
+        if graph_color_plan is not None:
+            return graph_color_plan
         graph_mode_plan = _plan_graph_set_mode(text, context)
         if graph_mode_plan is not None:
             return graph_mode_plan

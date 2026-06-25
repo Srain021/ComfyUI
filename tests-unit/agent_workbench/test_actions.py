@@ -106,6 +106,19 @@ def test_graph_duplicate_node_is_canvas_edit_without_extra_confirmation():
     assert plan["requires_confirmation"] is False
 
 
+def test_graph_set_color_is_canvas_edit_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Color graph node 12",
+            "actions": [{"type": "graph.set_color", "payload": {"node_id": 12, "color": "#ff5555"}}],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
 def test_graph_set_mode_is_canvas_edit_without_extra_confirmation():
     plan = validate_plan(
         {

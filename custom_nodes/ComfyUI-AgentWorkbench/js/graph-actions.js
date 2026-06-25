@@ -168,6 +168,16 @@ function cloneGraphNode(graph, source, payload) {
   return copy;
 }
 
+function resolveGraphColor(value, label) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`graph.set_color requires ${label} to be a string`);
+  }
+  return value.trim();
+}
+
 function repaintCanvas(graph) {
   app.canvas?.setDirty?.(true, true);
   graph.setDirtyCanvas?.(true, true);
@@ -278,6 +288,18 @@ export function applyGraphAction(action) {
       selectGraphNode(graph, copy, false);
     }
     return { type: action.type, source_node_id: source.id, node_id: copy.id, pos: copy.pos };
+  }
+  if (action.type === "graph.set_color") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    const color = resolveGraphColor(action.payload.color, "color");
+    const bgcolor = resolveGraphColor(action.payload.bgcolor, "bgcolor");
+    node.color = color;
+    if (bgcolor !== null) {
+      node.bgcolor = bgcolor;
+    }
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, color: node.color, bgcolor: node.bgcolor };
   }
   if (action.type === "graph.set_mode") {
     const graph = currentGraph();

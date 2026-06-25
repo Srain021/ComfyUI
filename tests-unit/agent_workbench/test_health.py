@@ -113,6 +113,8 @@ def test_frontend_graph_snapshot_includes_slots_for_connection_planning():
 
     assert "slotRows" in script
     assert "mode: node.mode" in script
+    assert "color: node.color" in script
+    assert "bgcolor: node.bgcolor" in script
     assert "inputs: slotRows(node.inputs)" in script
     assert "outputs: slotRows(node.outputs)" in script
     assert "type: slot.type" in script
@@ -146,6 +148,7 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert 'action.type === "graph.connect"' in graph_actions
     assert 'action.type === "graph.delete_node"' in graph_actions
     assert 'action.type === "graph.duplicate_node"' in graph_actions
+    assert 'action.type === "graph.set_color"' in graph_actions
     assert 'action.type === "graph.set_mode"' in graph_actions
     assert 'action.type === "graph.set_title"' in graph_actions
     assert 'action.type === "graph.set_position"' in graph_actions
@@ -161,6 +164,7 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "graph.remove(node)" in graph_actions
     assert "cloneGraphNode(" in graph_actions
     assert "node.selected = true" in graph_actions
+    assert "node.color =" in graph_actions
     assert "node.mode =" in graph_actions
     assert "node.title =" in graph_actions
     assert "node.pos =" in graph_actions
