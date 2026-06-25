@@ -1029,9 +1029,20 @@ def _extract_url(text: str) -> str | None:
     return None
 
 
+CUSTOM_NODE_MARKERS = (
+    "custom node",
+    "custom nodes",
+    "自定义节点",
+    "节点管理器",
+    "manager",
+    "插件",
+    "扩展",
+)
+
+
 def _extract_custom_node_id(text: str) -> str | None:
     match = re.search(
-        r"(?:custom\s+node|自定义节点|节点)\s+([A-Za-z0-9_.:/-]+)",
+        r"(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)\s+([A-Za-z0-9_.:/-]+)",
         text,
         re.IGNORECASE,
     )
@@ -1042,7 +1053,7 @@ def _extract_custom_node_id(text: str) -> str | None:
 
 def _mentions_custom_node(text: str) -> bool:
     lowered = text.lower()
-    return "custom node" in lowered or "custom nodes" in lowered or "自定义节点" in text
+    return any(marker in lowered or marker in text for marker in CUSTOM_NODE_MARKERS)
 
 
 def _plan_custom_node_manager_action(text: str) -> dict | None:
@@ -1273,7 +1284,7 @@ class RuleBasedPlanner:
         custom_node_manager_plan = _plan_custom_node_manager_action(text)
         if custom_node_manager_plan is not None:
             return custom_node_manager_plan
-        if ("custom node" in lowered or "自定义节点" in text) and any(
+        if _mentions_custom_node(text) and any(
             term in lowered or term in text for term in ("install", "安装")
         ):
             url = _extract_url(text)
@@ -1287,7 +1298,7 @@ class RuleBasedPlanner:
                         }
                     ],
                 }
-        if ("custom node" in lowered or "自定义节点" in text or "节点" in text) and any(
+        if (_mentions_custom_node(text) or "节点" in text) and any(
             term in lowered or term in text for term in ("disable", "禁用")
         ):
             node_id = _extract_custom_node_id(text)
@@ -1296,7 +1307,7 @@ class RuleBasedPlanner:
                     "summary": f"Disable custom node {node_id}",
                     "actions": [{"type": "custom_node.disable", "payload": {"id": node_id}}],
                 }
-        if ("custom node" in lowered or "自定义节点" in text or "节点" in text) and any(
+        if (_mentions_custom_node(text) or "节点" in text) and any(
             term in lowered or term in text for term in ("enable", "启用")
         ):
             node_id = _extract_custom_node_id(text)

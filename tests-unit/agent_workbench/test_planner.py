@@ -1223,6 +1223,23 @@ def test_rule_planner_plans_custom_node_install_from_git_url():
     ]
 
 
+def test_rule_planner_plans_plugin_install_from_git_url():
+    plan = RuleBasedPlanner().plan(
+        "安装插件 https://github.com/example/ComfyUI-TestNode.git",
+        context={},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "custom_node.install",
+            "payload": {
+                "method": "git_url",
+                "url": "https://github.com/example/ComfyUI-TestNode.git",
+            },
+        }
+    ]
+
+
 def test_rule_planner_plans_custom_node_disable_and_enable():
     disable_plan = RuleBasedPlanner().plan("禁用 custom node ComfyUI-TestNode", context={})
     enable_plan = RuleBasedPlanner().plan("启用 custom node ComfyUI-TestNode", context={})
@@ -1232,6 +1249,14 @@ def test_rule_planner_plans_custom_node_disable_and_enable():
     ]
     assert enable_plan["actions"] == [
         {"type": "custom_node.enable", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+
+
+def test_rule_planner_plans_plugin_disable():
+    plan = RuleBasedPlanner().plan("禁用插件 ComfyUI-TestNode", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.disable", "payload": {"id": "ComfyUI-TestNode"}}
     ]
 
 
@@ -1251,8 +1276,22 @@ def test_rule_planner_plans_custom_node_update_reinstall_and_fix():
     ]
 
 
+def test_rule_planner_plans_extension_fix():
+    plan = RuleBasedPlanner().plan("修复扩展 ComfyUI-BrokenNode", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.fix", "payload": {"id": "ComfyUI-BrokenNode"}}
+    ]
+
+
 def test_rule_planner_plans_custom_node_update_all():
     plan = RuleBasedPlanner().plan("更新全部 custom nodes", context={})
+
+    assert plan["actions"] == [{"type": "custom_node.update_all", "payload": {}}]
+
+
+def test_rule_planner_plans_plugin_update_all():
+    plan = RuleBasedPlanner().plan("更新全部插件", context={})
 
     assert plan["actions"] == [{"type": "custom_node.update_all", "payload": {}}]
 
