@@ -80,6 +80,19 @@ def test_compose_up_action_requires_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_graph_delete_node_is_canvas_edit_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Delete graph node 12",
+            "actions": [{"type": "graph.delete_node", "payload": {"node_id": 12}}],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
 def test_stable_plan_hash_ignores_top_level_plan_hash():
     plan = validate_plan(
         {

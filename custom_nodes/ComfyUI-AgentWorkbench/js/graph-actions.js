@@ -105,6 +105,13 @@ export function applyGraphAction(action) {
       target_slot: targetSlot,
     };
   }
+  if (action.type === "graph.delete_node") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    graph.remove(node);
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id };
+  }
   throw new Error(`Unsupported browser graph action: ${action.type}`);
 }
 

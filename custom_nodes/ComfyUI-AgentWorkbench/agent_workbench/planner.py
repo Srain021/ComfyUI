@@ -285,6 +285,20 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     }
 
 
+def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("删除", "删掉", "移除", "delete", "remove")):
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Delete graph node {node.get('id')}",
+        "actions": [{"type": "graph.delete_node", "payload": {"node_id": node.get("id")}}],
+    }
+
+
 def _widget_name_hint_from_text(text: str) -> str | None:
     lowered = text.lower()
     for triggers, names in WIDGET_ALIASES:
@@ -513,6 +527,9 @@ class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
         lowered = text.lower()
+        graph_delete_plan = _plan_graph_delete_node(text, context)
+        if graph_delete_plan is not None:
+            return graph_delete_plan
         graph_connect_plan = _plan_graph_connect(text, context)
         if graph_connect_plan is not None:
             return graph_connect_plan
