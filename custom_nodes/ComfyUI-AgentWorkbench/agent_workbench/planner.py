@@ -2215,7 +2215,29 @@ def _plan_compose_up(text: str) -> dict | None:
 
 def _extract_command_flag(text: str) -> str | None:
     match = re.search(r"--[A-Za-z0-9][A-Za-z0-9-]*", text)
-    return match.group(0) if match else None
+    if match:
+        return match.group(0)
+    lowered = text.lower()
+    aliases = (
+        (("bf16 vae", "bf16-vae", "bf16_vae"), "--bf16-vae"),
+        (
+            ("cuda malloc", "cudamalloc", "cuda-malloc", "cuda_malloc"),
+            "--disable-cuda-malloc",
+        ),
+        (
+            ("pinned memory", "pinned-memory", "pinned_memory", "pin memory"),
+            "--disable-pinned-memory",
+        ),
+        (
+            ("pytorch cross attention", "cross attention", "cross-attention", "sdpa"),
+            "--use-pytorch-cross-attention",
+        ),
+        (("auto launch", "auto-launch", "自动打开浏览器"), "--disable-auto-launch"),
+    )
+    for triggers, flag in aliases:
+        if any(trigger in lowered or trigger in text for trigger in triggers):
+            return flag
+    return None
 
 
 def _plan_compose_command_flag(text: str) -> dict | None:
@@ -2233,7 +2255,7 @@ def _plan_compose_command_flag(text: str) -> dict | None:
         enabled = True
     if any(
         term in lowered or term in text
-        for term in ("禁用", "关闭", "移除", "删除", "去掉", "disable", "remove", "delete")
+        for term in ("禁用", "关闭", "关掉", "移除", "删除", "去掉", "disable", "remove", "delete")
     ):
         enabled = False
     if enabled is None:

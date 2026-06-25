@@ -2886,6 +2886,24 @@ def test_rule_planner_plans_compose_command_flag_enable_and_disable():
     ]
 
 
+def test_rule_planner_plans_compose_command_flag_from_natural_aliases():
+    enable_plan = RuleBasedPlanner().plan("打开 ComfyUI 的 bf16 vae 启动参数并应用配置", context={})
+    disable_plan = RuleBasedPlanner().plan("关掉 ComfyUI 的 cuda malloc 启动参数", context={})
+
+    assert enable_plan["actions"] == [
+        {
+            "type": "compose.set_command_flag",
+            "payload": {"flag": "--bf16-vae", "enabled": True},
+        }
+    ]
+    assert disable_plan["actions"] == [
+        {
+            "type": "compose.set_command_flag",
+            "payload": {"flag": "--disable-cuda-malloc", "enabled": False},
+        }
+    ]
+
+
 def test_rule_planner_plans_custom_node_install_from_git_url():
     plan = RuleBasedPlanner().plan(
         "安装 custom node https://github.com/example/ComfyUI-TestNode.git",
