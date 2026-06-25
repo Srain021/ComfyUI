@@ -1353,6 +1353,25 @@ def test_rule_planner_selects_node_by_title():
     ]
 
 
+def test_rule_planner_selects_all_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "选中所有 KSampler 节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.select_nodes", "payload": {"node_ids": [9, 10], "focus": False}}
+    ]
+
+
 def test_rule_planner_focuses_node_by_id():
     plan = RuleBasedPlanner().plan(
         "聚焦 12 号节点",

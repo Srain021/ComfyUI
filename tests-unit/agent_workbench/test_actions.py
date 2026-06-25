@@ -178,6 +178,19 @@ def test_graph_select_node_is_canvas_edit_without_extra_confirmation():
     assert plan["requires_confirmation"] is False
 
 
+def test_graph_select_nodes_is_canvas_edit_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Select KSamplers",
+            "actions": [{"type": "graph.select_nodes", "payload": {"node_ids": [9, 10]}}],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
 def test_queue_prompt_requires_runtime_confirmation():
     plan = validate_plan(
         {

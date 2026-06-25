@@ -157,6 +157,7 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert 'action.type === "graph.set_position"' in graph_actions
     assert 'action.type === "graph.disconnect"' in graph_actions
     assert 'action.type === "graph.select_node"' in graph_actions
+    assert 'action.type === "graph.select_nodes"' in graph_actions
     assert "app.graph.getNodeById" in graph_actions
     assert "globalThis.LiteGraph.createNode" in graph_actions
     assert ".selectNode(" in graph_actions
@@ -170,6 +171,7 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "graph.remove(node)" in graph_actions
     assert "cloneGraphNode(" in graph_actions
     assert "node.selected = true" in graph_actions
+    assert "selectGraphNodes(" in graph_actions
     assert "node.color =" in graph_actions
     assert "node.mode =" in graph_actions
     assert "node.title =" in graph_actions

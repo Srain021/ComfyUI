@@ -218,6 +218,24 @@ function selectGraphNode(graph, node, focus) {
   repaintCanvas(graph);
 }
 
+function selectGraphNodes(graph, nodes, focus) {
+  for (const item of graph._nodes || graph.nodes || []) {
+    item.selected = false;
+  }
+  const selectedNodes = {};
+  for (const node of nodes) {
+    node.selected = true;
+    selectedNodes[node.id] = node;
+  }
+  if (app.canvas && "selected_nodes" in app.canvas) {
+    app.canvas.selected_nodes = selectedNodes;
+  }
+  if (focus && nodes[0] && typeof app.canvas?.centerOnNode === "function") {
+    app.canvas.centerOnNode(nodes[0]);
+  }
+  repaintCanvas(graph);
+}
+
 export function applyGraphAction(action) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
@@ -351,6 +369,16 @@ export function applyGraphAction(action) {
     const focus = action.payload.focus === true;
     selectGraphNode(graph, node, focus);
     return { type: action.type, node_id: node.id, focus };
+  }
+  if (action.type === "graph.select_nodes") {
+    const graph = currentGraph();
+    if (!Array.isArray(action.payload.node_ids) || !action.payload.node_ids.length) {
+      throw new Error("graph.select_nodes requires node_ids");
+    }
+    const nodes = action.payload.node_ids.map((nodeId) => requireNode(graph, nodeId));
+    const focus = action.payload.focus === true;
+    selectGraphNodes(graph, nodes, focus);
+    return { type: action.type, node_ids: nodes.map((node) => node.id), focus };
   }
   throw new Error(`Unsupported browser graph action: ${action.type}`);
 }

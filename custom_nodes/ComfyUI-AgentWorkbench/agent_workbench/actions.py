@@ -27,6 +27,7 @@ ACTION_REGISTRY = {
     "graph.set_title": ("graph.edit", "canvas"),
     "graph.set_position": ("graph.edit", "canvas"),
     "graph.select_node": ("graph.edit", "canvas"),
+    "graph.select_nodes": ("graph.edit", "canvas"),
     "workflow.save": ("workflow.write", "file"),
     "runtime.queue_prompt": ("runtime.queue", "runtime"),
     "runtime.clear_queue": ("runtime.queue", "runtime"),

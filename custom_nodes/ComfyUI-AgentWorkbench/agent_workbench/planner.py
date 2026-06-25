@@ -1109,6 +1109,20 @@ def _plan_graph_select_node(text: str, context: dict) -> dict | None:
     if focus is False and _extract_value_after_set(text):
         return None
     nodes = _graph_nodes(context)
+    bulk_nodes = _select_all_matching_nodes(nodes, text)
+    if len(bulk_nodes) >= 2:
+        return {
+            "summary": f"Select {len(bulk_nodes)} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.select_nodes",
+                    "payload": {
+                        "node_ids": [node.get("id") for node in bulk_nodes],
+                        "focus": focus,
+                    },
+                }
+            ],
+        }
     node = _select_node_for_selection(nodes, text)
     if node is None:
         return None
