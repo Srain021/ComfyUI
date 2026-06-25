@@ -94,6 +94,19 @@ def test_compose_up_action_requires_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_prerender_free_memory_action_requires_explicit_approval():
+    plan = validate_plan(
+        {
+            "summary": "Prepare memory before rendering",
+            "actions": [{"type": "service.prerender_free_memory", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.restart"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_graph_delete_node_is_canvas_edit_without_extra_confirmation():
     plan = validate_plan(
         {
@@ -297,6 +310,7 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
         ("service.restart_container", {"container": "comfyui-gb10"}, "service"),
         ("service.stop_container", {"container": "comfyui-gb10"}, "service"),
         ("service.start_container", {"container": "comfyui-gb10"}, "service"),
+        ("service.prerender_free_memory", {}, "service"),
         ("sudo.print_command", {"command": "sudo swapoff -a"}, "human_sudo"),
     ],
 )

@@ -1767,6 +1767,21 @@ def _plan_runtime_clear_queue(text: str) -> dict | None:
     return None
 
 
+def _plan_prerender_free_memory(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_prerender = any(
+        term in lowered or term in text
+        for term in ("渲染前", "开渲前", "出图前", "pre-render", "prerender")
+    )
+    mentions_memory = any(term in lowered or term in text for term in ("内存", "memory", "free"))
+    if not (mentions_prerender and mentions_memory):
+        return None
+    return {
+        "summary": "Run prerender free-memory preparation",
+        "actions": [{"type": "service.prerender_free_memory", "payload": {}}],
+    }
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -1922,6 +1937,9 @@ class RuleBasedPlanner:
         compose_up_plan = _plan_compose_up(text)
         if compose_up_plan is not None:
             return compose_up_plan
+        prerender_free_memory_plan = _plan_prerender_free_memory(text)
+        if prerender_free_memory_plan is not None:
+            return prerender_free_memory_plan
         if "free" in lowered or "释放" in text or "腾内存" in text or "内存" in text:
             return {
                 "summary": "Free ComfyUI memory",

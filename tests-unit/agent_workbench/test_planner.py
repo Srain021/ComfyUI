@@ -16,6 +16,13 @@ def test_rule_planner_free_memory():
     assert plan["actions"][0]["payload"] == {"unload_models": True, "free_memory": True}
 
 
+def test_rule_planner_prerender_free_memory_uses_ops_script():
+    plan = RuleBasedPlanner().plan("渲染前腾内存", context={})
+
+    assert plan["actions"] == [{"type": "service.prerender_free_memory", "payload": {}}]
+    assert plan["summary"] == "Run prerender free-memory preparation"
+
+
 def test_rule_planner_reserve_vram():
     plan = RuleBasedPlanner().plan("把 compose reserve-vram 改到 10", context={})
 

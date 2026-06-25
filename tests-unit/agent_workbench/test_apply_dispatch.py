@@ -157,6 +157,29 @@ def test_apply_dispatches_confirmed_container_lifecycle_actions(tmp_path):
     ]
 
 
+def test_apply_dispatches_confirmed_prerender_free_memory_script(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Prepare memory before rendering",
+            "actions": [{"type": "service.prerender_free_memory", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "service.prerender_free_memory"
+    assert executor.commands[-1] == ["bash", "dgx_spark_ltx_setup/prerender_free_memory.sh"]
+
+
 def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_path):
     dry_run = dry_run_plan(
         {

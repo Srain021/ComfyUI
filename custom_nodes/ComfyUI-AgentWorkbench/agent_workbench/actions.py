@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from .executor import DefaultExecutor
+from .ops.commands import PRERENDER_FREE_MEMORY_COMMAND
 from .ops.compose import DEFAULT_COMPOSE_PATH, apply_command_flag, apply_reserve_vram
 from .ops.manager import manager_request_for_action
 from .ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
@@ -47,6 +48,7 @@ ACTION_REGISTRY = {
     "service.restart_container": ("service.restart", "service"),
     "service.stop_container": ("service.restart", "service"),
     "service.start_container": ("service.restart", "service"),
+    "service.prerender_free_memory": ("service.restart", "service"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
 
@@ -71,6 +73,7 @@ SERVER_DEFERABLE_ACTIONS = {
     "service.restart_container",
     "service.stop_container",
     "service.start_container",
+    "service.prerender_free_memory",
     "runtime.stop_ollama_model",
 }
 
@@ -202,6 +205,8 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
     if action_type == "service.start_container":
         container = payload.get("container", "comfyui-gb10")
         return {"type": action_type, "command": executor.run_command(["docker", "start", container])}
+    if action_type == "service.prerender_free_memory":
+        return {"type": action_type, "command": executor.run_command(PRERENDER_FREE_MEMORY_COMMAND)}
     if action_type == "runtime.stop_ollama_model":
         model = str(_required_payload(payload, "model", action_type))
         return {"type": action_type, "command": executor.run_command(["ollama", "stop", model])}
