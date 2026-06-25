@@ -63,6 +63,80 @@ def test_rule_planner_sets_selected_prompt_widget_from_natural_language():
     ]
 
 
+def test_rule_planner_sets_selected_prompt_nodes_without_touching_other_selected_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把选中的 prompt 节点改成 neon skyline",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "selected": True,
+                        "widgets": [{"name": "seed", "value": 12345}],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP Text Encode",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "neon skyline"},
+        }
+    ]
+
+
+def test_rule_planner_sets_all_clip_text_prompt_nodes_by_generic_prompt_alias():
+    plan = RuleBasedPlanner().plan(
+        "把所有 prompt 节点改成 warm daylight",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP Text Encode",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP Text Encode",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "seed", "value": 12345}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "warm daylight"},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "warm daylight"},
+        },
+    ]
+
+
 def test_rule_planner_sets_selected_prompt_content_with_write_synonym():
     plan = RuleBasedPlanner().plan(
         "把这个 prompt 节点的内容写成 neon skyline",

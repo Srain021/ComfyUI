@@ -181,6 +181,40 @@ NODE_LABEL_ALIASES = (
 )
 
 
+PROMPT_TEXT_WIDGET_NAMES = (
+    "text",
+    "prompt",
+    "prompt_text",
+    "positive",
+    "positive_prompt",
+    "negative",
+    "negative_prompt",
+)
+
+
+def _message_mentions_generic_prompt(text: str) -> bool:
+    lowered = text.lower()
+    return "prompt" in lowered or "提示词" in text
+
+
+def _node_has_prompt_text_widget(node: dict) -> bool:
+    return _find_widget_by_name(_node_widgets(node), PROMPT_TEXT_WIDGET_NAMES) is not None
+
+
+def _node_looks_like_prompt_text_node(node: dict) -> bool:
+    if not _node_has_prompt_text_widget(node):
+        return False
+    label = _node_label(node).lower()
+    compact = re.sub(r"[\s_./:-]+", "", label)
+    return "prompt" in label or "提示词" in label or "cliptextencode" in compact
+
+
+def _generic_prompt_text_nodes(nodes: list[dict], text: str) -> list[dict]:
+    if not _message_mentions_generic_prompt(text):
+        return []
+    return [node for node in nodes if _node_looks_like_prompt_text_node(node)]
+
+
 def _find_node_by_semantic_label(nodes: list[dict], text: str) -> dict | None:
     lowered = text.lower()
     for triggers, label_candidates in NODE_LABEL_ALIASES:
@@ -196,6 +230,9 @@ def _find_node_by_semantic_label(nodes: list[dict], text: str) -> dict | None:
         if matches:
             matches.sort(key=lambda item: item[0], reverse=True)
             return matches[0][1]
+    generic_prompt_nodes = _generic_prompt_text_nodes(nodes, text)
+    if len(generic_prompt_nodes) == 1:
+        return generic_prompt_nodes[0]
     return None
 
 
@@ -264,6 +301,9 @@ def _find_nodes_by_semantic_label(nodes: list[dict], text: str) -> list[dict]:
             if any(candidate in label_lower for candidate in label_candidates):
                 matches.append(node)
         return matches
+    generic_prompt_nodes = _generic_prompt_text_nodes(nodes, text)
+    if generic_prompt_nodes:
+        return generic_prompt_nodes
     return []
 
 
