@@ -84,6 +84,17 @@ function resolveNodeMode(mode) {
   return resolved;
 }
 
+function resolvePosition(pos) {
+  if (!Array.isArray(pos) || pos.length < 2) {
+    throw new Error("graph.set_position requires pos [x, y]");
+  }
+  const nextPos = [Number(pos[0]), Number(pos[1])];
+  if (!Number.isFinite(nextPos[0]) || !Number.isFinite(nextPos[1])) {
+    throw new Error("graph.set_position requires finite coordinates");
+  }
+  return nextPos;
+}
+
 export function applyGraphAction(action) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
@@ -145,6 +156,23 @@ export function applyGraphAction(action) {
     node.mode = resolveNodeMode(action.payload.mode);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id, mode: node.mode };
+  }
+  if (action.type === "graph.set_title") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    if (typeof action.payload.title !== "string" || !action.payload.title) {
+      throw new Error("graph.set_title requires title");
+    }
+    node.title = action.payload.title;
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, title: node.title };
+  }
+  if (action.type === "graph.set_position") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    node.pos = resolvePosition(action.payload.pos);
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, pos: node.pos };
   }
   throw new Error(`Unsupported browser graph action: ${action.type}`);
 }

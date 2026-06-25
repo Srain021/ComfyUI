@@ -275,6 +275,82 @@ def test_rule_planner_enables_node_by_id():
     ]
 
 
+def test_rule_planner_renames_selected_node_title():
+    plan = RuleBasedPlanner().plan(
+        "把这个节点标题改成 Main Prompt",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_title", "payload": {"node_id": 12, "title": "Main Prompt"}}
+    ]
+
+
+def test_rule_planner_renames_node_by_title():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 节点重命名为 Final Sampler",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_title", "payload": {"node_id": 9, "title": "Final Sampler"}}
+    ]
+
+
+def test_rule_planner_moves_selected_node_to_absolute_position():
+    plan = RuleBasedPlanner().plan(
+        "把这个节点移动到 100, 200",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "CLIPTextEncode", "title": "Prompt", "selected": True}
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 12, "pos": [100, 200]}}
+    ]
+
+
+def test_rule_planner_moves_node_right_by_delta():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 往右移动 300",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "pos": [0, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "pos": [10, 20]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [310, 20]}}
+    ]
+
+
 def test_rule_planner_connects_two_nodes_by_id():
     plan = RuleBasedPlanner().plan(
         "把 1 号节点连接到 2 号节点",

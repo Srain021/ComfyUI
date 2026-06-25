@@ -142,10 +142,14 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert 'action.type === "graph.connect"' in graph_actions
     assert 'action.type === "graph.delete_node"' in graph_actions
     assert 'action.type === "graph.set_mode"' in graph_actions
+    assert 'action.type === "graph.set_title"' in graph_actions
+    assert 'action.type === "graph.set_position"' in graph_actions
     assert "app.graph.getNodeById" in graph_actions
     assert "globalThis.LiteGraph.createNode" in graph_actions
     assert ".connect(" in graph_actions
     assert "graph.remove(node)" in graph_actions
     assert "node.mode =" in graph_actions
+    assert "node.title =" in graph_actions
+    assert "node.pos =" in graph_actions
     assert "globalThis.LiteGraph.BYPASS" in graph_actions
     assert "app.graph.setDirtyCanvas(true, true)" in graph_actions

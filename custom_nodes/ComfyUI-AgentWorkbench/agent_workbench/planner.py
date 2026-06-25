@@ -326,6 +326,115 @@ def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
     }
 
 
+def _extract_title_value(text: str) -> str | None:
+    for delimiter in (
+        "重命名为",
+        "重命名成",
+        "改名为",
+        "改名成",
+        "命名为",
+        "标题改成",
+        "标题改为",
+        "标题设置为",
+        "标题设为",
+    ):
+        if delimiter in text:
+            return _strip_value(text.rsplit(delimiter, 1)[1])
+    match = re.search(r"\brename\b.+?\bto\b\s*(.+)$", text, re.IGNORECASE)
+    if match:
+        return _strip_value(match.group(1))
+    match = re.search(r"\btitle\b.+?\b(?:to|as)\b\s*(.+)$", text, re.IGNORECASE)
+    if match:
+        return _strip_value(match.group(1))
+    return None
+
+
+def _plan_graph_set_title(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("标题", "重命名", "改名", "命名", "rename", "title")):
+        return None
+    title = _extract_title_value(text)
+    if not title:
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Set graph node {node.get('id')} title",
+        "actions": [{"type": "graph.set_title", "payload": {"node_id": node.get("id"), "title": title}}],
+    }
+
+
+def _number_value(value: str) -> int | float:
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+def _node_position(node: dict) -> list[int | float]:
+    pos = node.get("pos")
+    if not isinstance(pos, list) or len(pos) < 2:
+        return [0, 0]
+    try:
+        return [_number_value(str(pos[0])), _number_value(str(pos[1]))]
+    except (TypeError, ValueError):
+        return [0, 0]
+
+
+def _extract_absolute_position(text: str) -> list[int | float] | None:
+    if not any(term in text.lower() or term in text for term in ("移动到", "移到", "move to")):
+        return None
+    match = re.search(
+        r"(?:移动到|移到|move\s+to)\s*\(?\s*(-?\d+(?:\.\d+)?)\s*[,， ]\s*(-?\d+(?:\.\d+)?)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return [_number_value(match.group(1)), _number_value(match.group(2))]
+
+
+def _extract_move_delta(text: str) -> list[int | float] | None:
+    lowered = text.lower()
+    directions = (
+        (("往右", "向右", "右移", "move right", "right"), (1, 0)),
+        (("往左", "向左", "左移", "move left", "left"), (-1, 0)),
+        (("往下", "向下", "下移", "move down", "down"), (0, 1)),
+        (("往上", "向上", "上移", "move up", "up"), (0, -1)),
+    )
+    direction = None
+    for terms, vector in directions:
+        if any(term in lowered or term in text for term in terms):
+            direction = vector
+            break
+    if direction is None:
+        return None
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+    distance = _number_value(numbers[-1]) if numbers else 100
+    return [direction[0] * distance, direction[1] * distance]
+
+
+def _plan_graph_set_position(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("移动", "移到", "挪", "move")):
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    pos = _extract_absolute_position(text)
+    if pos is None:
+        delta = _extract_move_delta(text)
+        if delta is None:
+            return None
+        current = _node_position(node)
+        pos = [current[0] + delta[0], current[1] + delta[1]]
+    return {
+        "summary": f"Move graph node {node.get('id')}",
+        "actions": [{"type": "graph.set_position", "payload": {"node_id": node.get("id"), "pos": pos}}],
+    }
+
+
 def _widget_name_hint_from_text(text: str) -> str | None:
     lowered = text.lower()
     for triggers, names in WIDGET_ALIASES:
@@ -560,6 +669,12 @@ class RuleBasedPlanner:
         graph_mode_plan = _plan_graph_set_mode(text, context)
         if graph_mode_plan is not None:
             return graph_mode_plan
+        graph_title_plan = _plan_graph_set_title(text, context)
+        if graph_title_plan is not None:
+            return graph_title_plan
+        graph_position_plan = _plan_graph_set_position(text, context)
+        if graph_position_plan is not None:
+            return graph_position_plan
         graph_connect_plan = _plan_graph_connect(text, context)
         if graph_connect_plan is not None:
             return graph_connect_plan

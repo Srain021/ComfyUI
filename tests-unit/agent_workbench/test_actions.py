@@ -106,6 +106,22 @@ def test_graph_set_mode_is_canvas_edit_without_extra_confirmation():
     assert plan["requires_confirmation"] is False
 
 
+def test_graph_title_and_position_are_canvas_edits_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Organize graph node 12",
+            "actions": [
+                {"type": "graph.set_title", "payload": {"node_id": 12, "title": "Main Prompt"}},
+                {"type": "graph.set_position", "payload": {"node_id": 12, "pos": [100, 200]}},
+            ],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
 def test_stable_plan_hash_ignores_top_level_plan_hash():
     plan = validate_plan(
         {
