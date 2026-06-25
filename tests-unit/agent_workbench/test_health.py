@@ -97,7 +97,7 @@ def test_frontend_exposes_plan_first_operator_controls():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 
     assert "/agent/context" in script
-    assert "/agent/dry-run" in script
+    assert "/agent/plan" in script
     assert "/agent/apply" in script
     assert "currentGraphSnapshot" in script
     assert "agent-workbench-confirm" in script

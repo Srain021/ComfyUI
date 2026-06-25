@@ -5,6 +5,7 @@ from aiohttp import web
 from .actions import PlanValidationError, apply_plan, dry_run_plan
 from .context import collect_context
 from .health import build_health_payload
+from .planner import default_planner
 
 
 _REGISTERED = False
@@ -44,6 +45,21 @@ def register_routes(prompt_server=None) -> None:
         graph = body.get("graph")
         context = collect_context(Path.cwd(), graph=graph)
         return web.json_response(context)
+
+    @routes.post("/agent/plan")
+    async def agent_plan(request):
+        body = await _json_request(request)
+        message = body.get("message", "")
+        graph = body.get("graph")
+        context = collect_context(Path.cwd(), graph=graph)
+        raw_plan = default_planner().plan(message, context=context)
+        try:
+            return web.json_response(dry_run_plan(raw_plan))
+        except PlanValidationError as exc:
+            return web.json_response(
+                {"ok": False, "error": str(exc), "raw_plan": raw_plan},
+                status=400,
+            )
 
     @routes.post("/agent/dry-run")
     async def agent_dry_run(request):

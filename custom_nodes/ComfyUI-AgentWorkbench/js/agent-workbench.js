@@ -118,11 +118,11 @@ function createWorkbenchPanel() {
   });
 
   panel.querySelector("#agent-workbench-plan").addEventListener("click", async () => {
-    const summary = input.value.trim() || "Inspect current ComfyUI context";
+    const message = input.value.trim() || "Inspect current ComfyUI context";
     confirmCheckbox.checked = false;
-    lastDryRun = await postJson("/agent/dry-run", {
-      summary,
-      actions: [{ type: "context.collect", payload: { graph: currentGraphSnapshot() } }],
+    lastDryRun = await postJson("/agent/plan", {
+      message,
+      graph: currentGraphSnapshot(),
     });
     refreshApplyState();
     renderJson(output, lastDryRun);

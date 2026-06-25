@@ -307,3 +307,31 @@ def test_register_routes_adds_dry_run_and_apply_routes():
         assert json.loads(invalid_response.text)["ok"] is False
     finally:
         agent_routes._REGISTERED = False
+
+
+def test_register_routes_adds_agent_plan_route():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/plan")].handler(
+                _FakeRequest(decoded_body={"message": "释放内存", "graph": {"nodes": []}})
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"][0]["type"] == "runtime.free_memory"
+        assert payload["plan"]["requires_confirmation"] is True
+    finally:
+        agent_routes._REGISTERED = False
