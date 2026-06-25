@@ -143,6 +143,17 @@ export function applyGraphAction(action) {
       target_slot: targetSlot,
     };
   }
+  if (action.type === "graph.disconnect") {
+    const graph = currentGraph();
+    const target = requireNode(graph, action.payload.target_node_id);
+    const targetSlot = resolveSlot(target.inputs, action.payload.target_slot, "Target");
+    if (typeof target.disconnectInput !== "function") {
+      throw new Error("Target node cannot disconnect inputs");
+    }
+    target.disconnectInput(targetSlot);
+    markGraphDirty(graph);
+    return { type: action.type, target_node_id: target.id, target_slot: targetSlot };
+  }
   if (action.type === "graph.delete_node") {
     const graph = currentGraph();
     const node = requireNode(graph, action.payload.node_id);

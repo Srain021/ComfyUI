@@ -619,6 +619,48 @@ def _plan_graph_connect(text: str, context: dict) -> dict | None:
     return None
 
 
+def _disconnect_input_plan(nodes: list[dict], target_phrase: str, slot_hint: str) -> dict | None:
+    target = _select_node(nodes, target_phrase)
+    if target is None:
+        target = _find_node_for_phrase(nodes, target_phrase)
+    if target is None:
+        return None
+    target_slot = _slot_index_for_hint(target, "inputs", slot_hint)
+    if target_slot is None:
+        return None
+    return {
+        "summary": f"Disconnect input {target_slot} on node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {
+                    "target_node_id": target.get("id"),
+                    "target_slot": target_slot,
+                },
+            }
+        ],
+    }
+
+
+def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("断开", "清空", "移除连接", "disconnect")):
+        return None
+    nodes = _graph_nodes(context)
+    patterns = (
+        r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*([A-Za-z0-9_ -]+)\s*(?:输入|input)?$",
+        r"\bdisconnect\s+(.+?)\s+([A-Za-z0-9_ -]+)\s+input\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _disconnect_input_plan(nodes, match.group(1), match.group(2))
+        if plan is not None:
+            return plan
+    return None
+
+
 def _extract_url(text: str) -> str | None:
     match = re.search(r"https?://[^\s，。]+", text)
     if match:
@@ -675,6 +717,9 @@ class RuleBasedPlanner:
         graph_position_plan = _plan_graph_set_position(text, context)
         if graph_position_plan is not None:
             return graph_position_plan
+        graph_disconnect_plan = _plan_graph_disconnect(text, context)
+        if graph_disconnect_plan is not None:
+            return graph_disconnect_plan
         graph_connect_plan = _plan_graph_connect(text, context)
         if graph_connect_plan is not None:
             return graph_connect_plan

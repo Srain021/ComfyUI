@@ -19,6 +19,7 @@ ACTION_REGISTRY = {
     "graph.set_widget": ("graph.edit", "canvas"),
     "graph.add_node": ("graph.edit", "canvas"),
     "graph.connect": ("graph.edit", "canvas"),
+    "graph.disconnect": ("graph.edit", "canvas"),
     "graph.delete_node": ("graph.edit", "canvas"),
     "graph.set_mode": ("graph.edit", "canvas"),
     "graph.set_title": ("graph.edit", "canvas"),
