@@ -2258,7 +2258,10 @@ def _container_lifecycle_action(action_type: str) -> dict:
 
 def _mentions_service_restart(text: str) -> bool:
     lowered = text.lower()
-    return ("重启" in text or "restart" in lowered) and any(
+    mentions_restart = "重启" in text or "restart" in lowered
+    if not mentions_restart:
+        return False
+    return _mentions_custom_node(text) or any(
         term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
     )
 

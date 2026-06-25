@@ -3651,6 +3651,28 @@ def test_rule_planner_plans_plugin_install_by_manager_id_then_restart():
     ]
 
 
+def test_rule_planner_plans_plugin_install_then_bare_restart():
+    plan = RuleBasedPlanner().plan("安装 Impact-Pack 插件然后重启", context={})
+
+    assert plan["actions"] == [
+        {
+            "type": "custom_node.install",
+            "payload": {
+                "method": "manager_queue",
+                "node": {
+                    "id": "Impact-Pack",
+                    "version": "unknown",
+                    "ui_id": "Impact-Pack",
+                    "files": ["Impact-Pack"],
+                    "channel": "default",
+                    "mode": "cache",
+                },
+            },
+        },
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
 def test_rule_planner_plans_custom_node_disable_and_enable():
     disable_plan = RuleBasedPlanner().plan("禁用 custom node ComfyUI-TestNode", context={})
     enable_plan = RuleBasedPlanner().plan("启用 custom node ComfyUI-TestNode", context={})
@@ -3750,6 +3772,15 @@ def test_rule_planner_plans_plugin_update_all():
     plan = RuleBasedPlanner().plan("更新全部插件", context={})
 
     assert plan["actions"] == [{"type": "custom_node.update_all", "payload": {}}]
+
+
+def test_rule_planner_plans_plugin_update_all_then_bare_restart():
+    plan = RuleBasedPlanner().plan("更新全部插件后重启", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.update_all", "payload": {}},
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
 
 
 def test_rule_planner_plans_custom_node_disable_then_restart():
