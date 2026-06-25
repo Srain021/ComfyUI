@@ -244,6 +244,25 @@ def test_queue_prompt_requires_runtime_confirmation():
     assert plan["requires_confirmation"] is True
 
 
+def test_graph_edit_then_queue_prompt_requires_runtime_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Edit prompt then queue workflow",
+            "actions": [
+                {
+                    "type": "graph.set_widget",
+                    "payload": {"node_id": 12, "widget": "text", "value": "cinematic lighting"},
+                },
+                {"type": "runtime.queue_prompt", "payload": {"front": False}},
+            ],
+        }
+    )
+
+    assert plan["risk_level"] == "runtime"
+    assert plan["required_capabilities"] == ["graph.edit", "runtime.queue"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_clear_queue_requires_runtime_confirmation():
     plan = validate_plan(
         {

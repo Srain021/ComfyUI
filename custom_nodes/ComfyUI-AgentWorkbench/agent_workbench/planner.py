@@ -1951,22 +1951,57 @@ def _plan_compose_command_flag(text: str) -> dict | None:
     }
 
 
+QUEUE_PROMPT_TERMS = (
+    "开始生成",
+    "插队生成",
+    "提交当前工作流",
+    "运行当前工作流",
+    "执行当前工作流",
+    "跑当前工作流",
+    "run workflow",
+    "queue prompt",
+    "queue workflow",
+)
+
+
+def _mentions_runtime_queue_prompt(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered or term in text for term in QUEUE_PROMPT_TERMS)
+
+
+def _strip_queue_prompt_clause(text: str) -> str:
+    lowered = text.lower()
+    starts = [
+        lowered.find(term.lower())
+        for term in QUEUE_PROMPT_TERMS
+        if lowered.find(term.lower()) >= 0
+    ]
+    if not starts:
+        return text
+    start = min(starts)
+    prefix = text[:start].rstrip()
+    for connector in ("and then", "然后", "之后", "接着", "then", "and", "并", "再"):
+        if prefix.lower().endswith(connector):
+            start = len(prefix) - len(connector)
+            break
+    else:
+        if start > 0:
+            return text
+    return _strip_value(text[:start])
+
+
+def _combine_with_queue_prompt(plan: dict, queue_plan: dict | None, graph_text: str, text: str) -> dict:
+    if queue_plan is None or graph_text == text:
+        return plan
+    return {
+        "summary": f"{plan['summary']} then queue workflow",
+        "actions": [*plan["actions"], *queue_plan["actions"]],
+    }
+
+
 def _plan_runtime_queue_prompt(text: str) -> dict | None:
     lowered = text.lower()
-    if not any(
-        term in lowered or term in text
-        for term in (
-            "开始生成",
-            "插队生成",
-            "提交当前工作流",
-            "运行当前工作流",
-            "执行当前工作流",
-            "跑当前工作流",
-            "run workflow",
-            "queue prompt",
-            "queue workflow",
-        )
-    ):
+    if not _mentions_runtime_queue_prompt(text):
         return None
     front = any(term in lowered or term in text for term in ("插队", "队首", "front"))
     return {
@@ -2058,6 +2093,8 @@ class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
         lowered = text.lower()
+        queue_prompt_plan = _plan_runtime_queue_prompt(text)
+        graph_text = _strip_queue_prompt_clause(text) if queue_prompt_plan is not None else text
         graph_delete_plan = _plan_graph_delete_node(text, context)
         if graph_delete_plan is not None:
             return graph_delete_plan
@@ -2097,10 +2134,9 @@ class RuleBasedPlanner:
         graph_add_plan = _plan_graph_add_node(text)
         if graph_add_plan is not None:
             return graph_add_plan
-        graph_plan = _plan_graph_widget_edit(text, context)
+        graph_plan = _plan_graph_widget_edit(graph_text, context)
         if graph_plan is not None:
-            return graph_plan
-        queue_prompt_plan = _plan_runtime_queue_prompt(text)
+            return _combine_with_queue_prompt(graph_plan, queue_prompt_plan, graph_text, text)
         if queue_prompt_plan is not None:
             return queue_prompt_plan
         clear_queue_plan = _plan_runtime_clear_queue(text)

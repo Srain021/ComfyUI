@@ -63,6 +63,60 @@ def test_rule_planner_sets_selected_prompt_widget_from_natural_language():
     ]
 
 
+def test_rule_planner_edits_prompt_then_queues_workflow():
+    plan = RuleBasedPlanner().plan(
+        "把这个 prompt 节点的文本改成 cinematic lighting 然后开始生成",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "cinematic lighting"},
+        },
+        {"type": "runtime.queue_prompt", "payload": {"front": False}},
+    ]
+
+
+def test_rule_planner_edits_prompt_then_queues_workflow_at_front():
+    plan = RuleBasedPlanner().plan(
+        "把这个 prompt 节点改成 neon skyline 并插队生成",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "neon skyline"},
+        },
+        {"type": "runtime.queue_prompt", "payload": {"front": True}},
+    ]
+
+
 def test_rule_planner_sets_selected_prompt_nodes_without_touching_other_selected_nodes():
     plan = RuleBasedPlanner().plan(
         "把选中的 prompt 节点改成 neon skyline",
