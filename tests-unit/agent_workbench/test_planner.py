@@ -868,6 +868,50 @@ def test_rule_planner_decreases_numeric_widget_from_current_value():
     ]
 
 
+def test_rule_planner_treats_tune_up_to_as_absolute_value():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的 cfg 调高到 8",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "cfg", "value": 7.0}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 8.0}}
+    ]
+
+
+def test_rule_planner_treats_lower_to_as_absolute_value():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的步数降低到 20",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "steps", "value": 28}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 20}}
+    ]
+
+
 def test_rule_planner_sets_multiple_widgets_on_same_node():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 改成 28，cfg 改成 7.5，seed 改成 12345",
