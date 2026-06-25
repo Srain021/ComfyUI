@@ -489,6 +489,15 @@ def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     if not any(term in lowered or term in text for term in ("删除", "删掉", "移除", "delete", "remove")):
         return None
     nodes = _graph_nodes(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
+    if bulk_nodes:
+        return {
+            "summary": f"Delete {len(bulk_nodes)} graph node(s)",
+            "actions": [
+                {"type": "graph.delete_node", "payload": {"node_id": node.get("id")}}
+                for node in bulk_nodes
+            ],
+        }
     node = _select_node(nodes, text)
     if node is None:
         return None
