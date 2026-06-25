@@ -1546,6 +1546,10 @@ def _restart_container_action() -> dict:
     return {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}}
 
 
+def _container_lifecycle_action(action_type: str) -> dict:
+    return {"type": action_type, "payload": {"container": "comfyui-gb10"}}
+
+
 def _mentions_service_restart(text: str) -> bool:
     lowered = text.lower()
     return ("重启" in text or "restart" in lowered) and any(
@@ -1560,6 +1564,30 @@ def _with_restart_followup(plan: dict, text: str) -> dict:
         "summary": f"{plan['summary']} and restart ComfyUI",
         "actions": [*plan["actions"], _restart_container_action()],
     }
+
+
+def _plan_container_lifecycle(text: str) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")):
+        return None
+    if "启动参数" in text or "command" in lowered or "flag" in lowered:
+        return None
+    if "重启" in text or "restart" in lowered:
+        return {
+            "summary": "Restart ComfyUI container",
+            "actions": [_restart_container_action()],
+        }
+    if any(term in lowered or term in text for term in ("停止", "停掉", "关闭", "关掉", "stop")):
+        return {
+            "summary": "Stop ComfyUI container",
+            "actions": [_container_lifecycle_action("service.stop_container")],
+        }
+    if any(term in lowered or term in text for term in ("启动", "开启", "打开", "start")):
+        return {
+            "summary": "Start ComfyUI container",
+            "actions": [_container_lifecycle_action("service.start_container")],
+        }
+    return None
 
 
 def _plan_custom_node_install_from_url(text: str) -> dict | None:
@@ -1839,13 +1867,9 @@ class RuleBasedPlanner:
         custom_node_plan = _plan_custom_node_action(text)
         if custom_node_plan is not None:
             return custom_node_plan
-        if ("重启" in text or "restart" in lowered) and any(
-            term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
-        ):
-            return {
-                "summary": "Restart ComfyUI container",
-                "actions": [_restart_container_action()],
-            }
+        container_lifecycle_plan = _plan_container_lifecycle(text)
+        if container_lifecycle_plan is not None:
+            return container_lifecycle_plan
         if "ollama" in lowered and any(term in lowered or term in text for term in ("stop", "停止", "驱逐")):
             model = _extract_ollama_model(text)
             if model:

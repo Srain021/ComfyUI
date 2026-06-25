@@ -67,6 +67,20 @@ def test_service_actions_require_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+@pytest.mark.parametrize("action_type", ["service.stop_container", "service.start_container"])
+def test_service_lifecycle_actions_require_explicit_approval(action_type):
+    plan = validate_plan(
+        {
+            "summary": "Change ComfyUI service state",
+            "actions": [{"type": action_type, "payload": {"container": "comfyui-gb10"}}],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.restart"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_compose_up_action_requires_explicit_approval():
     plan = validate_plan(
         {
@@ -281,6 +295,8 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
         ("custom_node.reinstall", {"id": "ComfyUI-TestNode"}, "package"),
         ("custom_node.fix", {"id": "ComfyUI-TestNode"}, "package"),
         ("service.restart_container", {"container": "comfyui-gb10"}, "service"),
+        ("service.stop_container", {"container": "comfyui-gb10"}, "service"),
+        ("service.start_container", {"container": "comfyui-gb10"}, "service"),
         ("sudo.print_command", {"command": "sudo swapoff -a"}, "human_sudo"),
     ],
 )

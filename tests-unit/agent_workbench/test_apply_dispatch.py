@@ -125,6 +125,38 @@ def test_apply_dispatches_confirmed_compose_up(tmp_path):
     ]
 
 
+def test_apply_dispatches_confirmed_container_lifecycle_actions(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Stop and start ComfyUI",
+            "actions": [
+                {"type": "service.stop_container", "payload": {"container": "comfyui-gb10"}},
+                {"type": "service.start_container", "payload": {"container": "comfyui-gb10"}},
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert [row["type"] for row in result["applied"]] == [
+        "service.stop_container",
+        "service.start_container",
+    ]
+    assert executor.commands[-2:] == [
+        ["docker", "stop", "comfyui-gb10"],
+        ["docker", "start", "comfyui-gb10"],
+    ]
+
+
 def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_path):
     dry_run = dry_run_plan(
         {

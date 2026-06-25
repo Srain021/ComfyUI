@@ -45,6 +45,8 @@ ACTION_REGISTRY = {
     "compose.set_command_flag": ("service.compose", "service"),
     "service.compose_up": ("service.compose", "service"),
     "service.restart_container": ("service.restart", "service"),
+    "service.stop_container": ("service.restart", "service"),
+    "service.start_container": ("service.restart", "service"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
 
@@ -67,6 +69,8 @@ SERVER_DEFERABLE_ACTIONS = {
     "compose.set_command_flag",
     "service.compose_up",
     "service.restart_container",
+    "service.stop_container",
+    "service.start_container",
     "runtime.stop_ollama_model",
 }
 
@@ -192,6 +196,12 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
     if action_type == "service.restart_container":
         container = payload.get("container", "comfyui-gb10")
         return {"type": action_type, "command": executor.run_command(["docker", "restart", container])}
+    if action_type == "service.stop_container":
+        container = payload.get("container", "comfyui-gb10")
+        return {"type": action_type, "command": executor.run_command(["docker", "stop", container])}
+    if action_type == "service.start_container":
+        container = payload.get("container", "comfyui-gb10")
+        return {"type": action_type, "command": executor.run_command(["docker", "start", container])}
     if action_type == "runtime.stop_ollama_model":
         model = str(_required_payload(payload, "model", action_type))
         return {"type": action_type, "command": executor.run_command(["ollama", "stop", model])}

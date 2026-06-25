@@ -1833,6 +1833,22 @@ def test_rule_planner_plans_restart_container():
     ]
 
 
+def test_rule_planner_plans_stop_container():
+    plan = RuleBasedPlanner().plan("停止 ComfyUI 容器", context={})
+
+    assert plan["actions"] == [
+        {"type": "service.stop_container", "payload": {"container": "comfyui-gb10"}}
+    ]
+
+
+def test_rule_planner_plans_start_container():
+    plan = RuleBasedPlanner().plan("启动 ComfyUI 容器", context={})
+
+    assert plan["actions"] == [
+        {"type": "service.start_container", "payload": {"container": "comfyui-gb10"}}
+    ]
+
+
 def test_rule_planner_plans_stop_ollama_model():
     plan = RuleBasedPlanner().plan("停止 ollama 模型 nemotron-3-nano:30b", context={})
 
