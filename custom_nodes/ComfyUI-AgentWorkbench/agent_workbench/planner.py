@@ -435,6 +435,45 @@ def _plan_graph_set_position(text: str, context: dict) -> dict | None:
     }
 
 
+def _graph_select_focus(text: str) -> bool | None:
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("聚焦", "定位", "居中", "focus", "center", "find")):
+        return True
+    if any(term in lowered or term in text for term in ("选中", "选择", "select")):
+        return False
+    return None
+
+
+def _select_node_for_selection(nodes: list[dict], text: str) -> dict | None:
+    explicit = _find_node_by_id(nodes, _extract_node_id(text))
+    if explicit is not None:
+        return explicit
+
+    labelled = _find_node_by_label(nodes, text)
+    if labelled is not None:
+        return labelled
+
+    return _select_node(nodes, text)
+
+
+def _plan_graph_select_node(text: str, context: dict) -> dict | None:
+    focus = _graph_select_focus(text)
+    if focus is None:
+        return None
+    if focus is False and _extract_value_after_set(text):
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node_for_selection(nodes, text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Select graph node {node.get('id')}",
+        "actions": [
+            {"type": "graph.select_node", "payload": {"node_id": node.get("id"), "focus": focus}}
+        ],
+    }
+
+
 def _widget_name_hint_from_text(text: str) -> str | None:
     lowered = text.lower()
     for triggers, names in WIDGET_ALIASES:
@@ -779,6 +818,9 @@ class RuleBasedPlanner:
         graph_position_plan = _plan_graph_set_position(text, context)
         if graph_position_plan is not None:
             return graph_position_plan
+        graph_select_plan = _plan_graph_select_node(text, context)
+        if graph_select_plan is not None:
+            return graph_select_plan
         graph_disconnect_plan = _plan_graph_disconnect(text, context)
         if graph_disconnect_plan is not None:
             return graph_disconnect_plan

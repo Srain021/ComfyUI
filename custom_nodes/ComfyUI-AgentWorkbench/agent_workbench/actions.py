@@ -24,6 +24,7 @@ ACTION_REGISTRY = {
     "graph.set_mode": ("graph.edit", "canvas"),
     "graph.set_title": ("graph.edit", "canvas"),
     "graph.set_position": ("graph.edit", "canvas"),
+    "graph.select_node": ("graph.edit", "canvas"),
     "workflow.save": ("workflow.write", "file"),
     "runtime.free_memory": ("runtime.free_memory", "runtime"),
     "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),

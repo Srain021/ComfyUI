@@ -351,6 +351,41 @@ def test_rule_planner_moves_node_right_by_delta():
     ]
 
 
+def test_rule_planner_selects_node_by_title():
+    plan = RuleBasedPlanner().plan(
+        "选中 KSampler 节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.select_node", "payload": {"node_id": 9, "focus": False}}
+    ]
+
+
+def test_rule_planner_focuses_node_by_id():
+    plan = RuleBasedPlanner().plan(
+        "聚焦 12 号节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.select_node", "payload": {"node_id": 12, "focus": True}}
+    ]
+
+
 def test_rule_planner_connects_two_nodes_by_id():
     plan = RuleBasedPlanner().plan(
         "把 1 号节点连接到 2 号节点",

@@ -113,6 +113,25 @@ function resolvePosition(pos) {
   return nextPos;
 }
 
+function repaintCanvas(graph) {
+  app.canvas?.setDirty?.(true, true);
+  graph.setDirtyCanvas?.(true, true);
+}
+
+function selectGraphNode(graph, node, focus) {
+  for (const item of graph._nodes || graph.nodes || []) {
+    item.selected = false;
+  }
+  node.selected = true;
+  if (typeof app.canvas?.selectNode === "function") {
+    app.canvas.selectNode(node, false);
+  }
+  if (focus && typeof app.canvas?.centerOnNode === "function") {
+    app.canvas.centerOnNode(node);
+  }
+  repaintCanvas(graph);
+}
+
 export function applyGraphAction(action) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
@@ -218,6 +237,13 @@ export function applyGraphAction(action) {
     node.pos = resolvePosition(action.payload.pos);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id, pos: node.pos };
+  }
+  if (action.type === "graph.select_node") {
+    const graph = currentGraph();
+    const node = requireNode(graph, action.payload.node_id);
+    const focus = action.payload.focus === true;
+    selectGraphNode(graph, node, focus);
+    return { type: action.type, node_id: node.id, focus };
   }
   throw new Error(`Unsupported browser graph action: ${action.type}`);
 }
