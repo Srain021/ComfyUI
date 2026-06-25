@@ -1469,7 +1469,57 @@ def _widget_name_hint_from_text(text: str) -> str | None:
     return None
 
 
+ADD_NODE_ALIASES = (
+    (
+        ("正向提示词", "正面提示词", "正向 prompt", "positive prompt"),
+        "CLIPTextEncode",
+        "Positive Prompt",
+    ),
+    (
+        ("负面提示词", "反向提示词", "负向提示词", "负面 prompt", "negative prompt"),
+        "CLIPTextEncode",
+        "Negative Prompt",
+    ),
+    (
+        ("提示词", "prompt node", "clip text encode", "cliptextencode"),
+        "CLIPTextEncode",
+        None,
+    ),
+    (
+        ("空 latent 图像", "空latent图像", "empty latent image", "latent image"),
+        "EmptyLatentImage",
+        None,
+    ),
+    (
+        ("lora 加载器", "lora加载器", "lora loader", "load lora", "lora 节点"),
+        "LoraLoader",
+        None,
+    ),
+    (
+        ("checkpoint 加载器", "checkpoint loader", "load checkpoint", "底模加载器"),
+        "CheckpointLoaderSimple",
+        None,
+    ),
+    (
+        ("vae 加载器", "vae加载器", "vae loader", "load vae"),
+        "VAELoader",
+        None,
+    ),
+)
+
+
+def _node_type_alias_to_add(text: str) -> tuple[str, str | None] | None:
+    lowered = text.lower()
+    for triggers, node_type, title in ADD_NODE_ALIASES:
+        if any(trigger in lowered or trigger in text for trigger in triggers):
+            return node_type, title
+    return None
+
+
 def _extract_node_type_to_add(text: str) -> str | None:
+    alias = _node_type_alias_to_add(text)
+    if alias is not None:
+        return alias[0]
     patterns = (
         r"(?:添加|新增|创建|加)(?:一个|一個|个)?\s*([A-Za-z][A-Za-z0-9_./:-]+)\s*(?:节点|node)",
         r"\b(?:add|create)\s+(?:a\s+|an\s+)?(?:node\s+)?([A-Za-z][A-Za-z0-9_./:-]+)\b",
@@ -1481,6 +1531,40 @@ def _extract_node_type_to_add(text: str) -> str | None:
     return None
 
 
+def _extract_new_node_size_widgets(text: str) -> dict[str, object]:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("尺寸", "分辨率", "size", "resolution")):
+        return {}
+    value = _extract_value_after_set(text)
+    if not value:
+        return {}
+    match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", value)
+    if not match:
+        return {}
+    return {
+        "width": _number_value(match.group(1)),
+        "height": _number_value(match.group(2)),
+    }
+
+
+def _new_node_widget_name(node_type: str, widget_name: str) -> str:
+    if node_type == "CLIPTextEncode" and widget_name in {"positive", "negative"}:
+        return "text"
+    return widget_name
+
+
+def _initial_widgets_for_new_node(node_type: str, text: str) -> dict[str, object]:
+    widgets = {}
+    widgets.update(_extract_new_node_size_widgets(text))
+    value = _extract_value_after_set(text)
+    widget_name = _widget_name_hint_from_text(text)
+    if value and widget_name:
+        widget_name = _new_node_widget_name(node_type, widget_name)
+        if widget_name not in widgets:
+            widgets[widget_name] = value
+    return widgets
+
+
 def _plan_graph_add_node(text: str) -> dict | None:
     if not any(term in text.lower() or term in text for term in ("添加", "新增", "创建", "add", "create")):
         return None
@@ -1488,10 +1572,12 @@ def _plan_graph_add_node(text: str) -> dict | None:
     if not node_type:
         return None
     payload = {"node_type": node_type}
-    value = _extract_value_after_set(text)
-    widget_name = _widget_name_hint_from_text(text)
-    if value and widget_name:
-        payload["widgets"] = {widget_name: value}
+    alias = _node_type_alias_to_add(text)
+    if alias is not None and alias[1]:
+        payload["title"] = alias[1]
+    widgets = _initial_widgets_for_new_node(node_type, text)
+    if widgets:
+        payload["widgets"] = widgets
     return {
         "summary": f"Add graph node {node_type}",
         "actions": [{"type": "graph.add_node", "payload": payload}],

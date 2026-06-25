@@ -1746,6 +1746,58 @@ def test_rule_planner_adds_node_with_initial_prompt_widget():
     ]
 
 
+def test_rule_planner_adds_positive_prompt_node_by_natural_alias():
+    plan = RuleBasedPlanner().plan(
+        "添加一个正向提示词节点，内容写成 neon skyline",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "CLIPTextEncode",
+                "title": "Positive Prompt",
+                "widgets": {"text": "neon skyline"},
+            },
+        }
+    ]
+
+
+def test_rule_planner_adds_empty_latent_image_node_by_natural_alias_with_size():
+    plan = RuleBasedPlanner().plan(
+        "添加一个空 latent 图像节点，尺寸改成 1024x576",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "EmptyLatentImage",
+                "widgets": {"width": 1024, "height": 576},
+            },
+        }
+    ]
+
+
+def test_rule_planner_adds_lora_loader_node_by_natural_alias_with_model():
+    plan = RuleBasedPlanner().plan(
+        "添加一个 LoRA 加载器节点，LoRA 换成 detail.safetensors",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "LoraLoader",
+                "widgets": {"lora_name": "detail.safetensors"},
+            },
+        }
+    ]
+
+
 def test_rule_planner_deletes_selected_node():
     plan = RuleBasedPlanner().plan(
         "删除这个节点",
