@@ -2252,6 +2252,33 @@ def test_rule_planner_sets_image_size_from_compact_dimensions():
     ]
 
 
+def test_rule_planner_sets_image_width_height_from_compact_dimensions():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的宽高改成 1024x576",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 512},
+                            {"name": "height", "value": 512},
+                            {"name": "batch_size", "value": 1},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1024}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 576}},
+    ]
+
+
 def test_rule_planner_sets_image_size_from_1080p_resolution_label():
     plan = RuleBasedPlanner().plan(
         "把 Empty Latent Image 的分辨率改成 1080p",
@@ -2400,6 +2427,23 @@ def test_rule_planner_adds_positive_prompt_node_by_natural_alias():
 def test_rule_planner_adds_empty_latent_image_node_by_natural_alias_with_size():
     plan = RuleBasedPlanner().plan(
         "添加一个空 latent 图像节点，尺寸改成 1024x576",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "EmptyLatentImage",
+                "widgets": {"width": 1024, "height": 576},
+            },
+        }
+    ]
+
+
+def test_rule_planner_adds_empty_latent_image_node_by_natural_alias_with_width_height():
+    plan = RuleBasedPlanner().plan(
+        "添加一个空 latent 图像节点，宽高改成 1024x576",
         context={"graph_input": {"nodes": []}},
     )
 

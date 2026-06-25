@@ -725,6 +725,29 @@ RESOLUTION_PRESETS = {
 }
 
 
+def _mentions_size(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered or term in text
+        for term in (
+            "尺寸",
+            "分辨率",
+            "宽高",
+            "高宽",
+            "宽和高",
+            "高和宽",
+            "宽度和高度",
+            "高度和宽度",
+            "size",
+            "resolution",
+            "width height",
+            "height width",
+            "width/height",
+            "w/h",
+        )
+    )
+
+
 def _size_widgets(node: dict) -> tuple[dict | None, dict | None]:
     widgets = _node_widgets(node)
     return _find_widget_by_name(widgets, ("width",)), _find_widget_by_name(widgets, ("height",))
@@ -745,7 +768,7 @@ def _current_dimension(widget: dict | None) -> int | None:
 
 def _size_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     lowered = text.lower()
-    if not any(term in lowered or term in text for term in ("尺寸", "分辨率", "size", "resolution")):
+    if not _mentions_size(text):
         return []
     value = _extract_value_after_set(text)
     if not value:
@@ -1693,8 +1716,7 @@ def _extract_node_type_to_add(text: str) -> str | None:
 
 
 def _extract_new_node_size_widgets(text: str) -> dict[str, object]:
-    lowered = text.lower()
-    if not any(term in lowered or term in text for term in ("尺寸", "分辨率", "size", "resolution")):
+    if not _mentions_size(text):
         return {}
     value = _extract_value_after_set(text)
     if not value:
