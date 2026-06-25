@@ -755,6 +755,12 @@ def test_rule_planner_plans_queue_current_workflow_to_front():
     assert plan["actions"] == [{"type": "runtime.queue_prompt", "payload": {"front": True}}]
 
 
+def test_rule_planner_plans_clear_pending_queue():
+    plan = RuleBasedPlanner().plan("清空待执行队列", context={})
+
+    assert plan["actions"] == [{"type": "runtime.clear_queue", "payload": {}}]
+
+
 def test_rule_planner_plans_interrupt_current_generation():
     plan = RuleBasedPlanner().plan("停止当前生成", context={})
 

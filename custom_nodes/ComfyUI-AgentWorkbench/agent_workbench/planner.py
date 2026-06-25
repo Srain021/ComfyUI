@@ -937,6 +937,28 @@ def _plan_runtime_interrupt(text: str) -> dict | None:
     return None
 
 
+def _plan_runtime_clear_queue(text: str) -> dict | None:
+    lowered = text.lower()
+    if any(
+        term in lowered or term in text
+        for term in (
+            "清空待执行队列",
+            "清空队列",
+            "清除队列",
+            "取消排队任务",
+            "清掉排队任务",
+            "clear queue",
+            "clear pending",
+            "cancel queued",
+        )
+    ):
+        return {
+            "summary": "Clear pending ComfyUI queue",
+            "actions": [{"type": "runtime.clear_queue", "payload": {}}],
+        }
+    return None
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -971,6 +993,9 @@ class RuleBasedPlanner:
         queue_prompt_plan = _plan_runtime_queue_prompt(text)
         if queue_prompt_plan is not None:
             return queue_prompt_plan
+        clear_queue_plan = _plan_runtime_clear_queue(text)
+        if clear_queue_plan is not None:
+            return clear_queue_plan
         interrupt_plan = _plan_runtime_interrupt(text)
         if interrupt_plan is not None:
             return interrupt_plan

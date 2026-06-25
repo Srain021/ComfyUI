@@ -27,6 +27,7 @@ ACTION_REGISTRY = {
     "graph.select_node": ("graph.edit", "canvas"),
     "workflow.save": ("workflow.write", "file"),
     "runtime.queue_prompt": ("runtime.queue", "runtime"),
+    "runtime.clear_queue": ("runtime.queue", "runtime"),
     "runtime.interrupt": ("runtime.interrupt", "runtime"),
     "runtime.free_memory": ("runtime.free_memory", "runtime"),
     "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),
@@ -157,6 +158,8 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
         return {"type": action_type, "command": executor.run_command(["ollama", "stop", model])}
     if action_type == "runtime.interrupt":
         return {"type": action_type, "http_request": {"path": "/interrupt", "json": payload}}
+    if action_type == "runtime.clear_queue":
+        return {"type": action_type, "http_request": {"path": "/queue", "json": {"clear": True}}}
     if action_type == "runtime.free_memory":
         return {"type": action_type, "http_request": {"path": "/free", "json": payload}}
     if action_type.startswith("custom_node."):

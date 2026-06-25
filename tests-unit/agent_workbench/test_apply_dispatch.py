@@ -187,6 +187,26 @@ def test_runtime_queue_prompt_returns_browser_required_action(tmp_path):
     }
 
 
+def test_runtime_clear_queue_returns_frontend_http_request(tmp_path):
+    dry_run = dry_run_plan(
+        {"summary": "Clear pending queue", "actions": [{"type": "runtime.clear_queue", "payload": {}}]}
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=RecordingExecutor(),
+    )
+
+    assert result["applied"][0] == {
+        "type": "runtime.clear_queue",
+        "http_request": {"path": "/queue", "json": {"clear": True}},
+    }
+
+
 def test_runtime_interrupt_returns_frontend_http_request(tmp_path):
     dry_run = dry_run_plan(
         {"summary": "Interrupt current generation", "actions": [{"type": "runtime.interrupt", "payload": {}}]}

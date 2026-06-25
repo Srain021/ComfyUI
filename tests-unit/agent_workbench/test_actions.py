@@ -165,6 +165,19 @@ def test_queue_prompt_requires_runtime_confirmation():
     assert plan["requires_confirmation"] is True
 
 
+def test_clear_queue_requires_runtime_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Clear pending queue",
+            "actions": [{"type": "runtime.clear_queue", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "runtime"
+    assert plan["required_capabilities"] == ["runtime.queue"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_interrupt_generation_requires_runtime_confirmation():
     plan = validate_plan(
         {
