@@ -32,7 +32,7 @@ test("control state requires confirmation before elevated apply", () => {
   });
 });
 
-test("control state allows canvas apply without elevated confirmation", () => {
+test("control state allows canvas apply and cancel without elevated confirmation", () => {
   const dryRun = {
     plan: {
       summary: "Edit prompt",
@@ -45,8 +45,17 @@ test("control state allows canvas apply without elevated confirmation", () => {
   assert.deepEqual(controlStateForDryRun(dryRun, false), {
     needsConfirmation: false,
     confirmHidden: true,
-    cancelHidden: true,
+    cancelHidden: false,
     applyDisabled: false,
+  });
+});
+
+test("control state hides cancel when there is no active plan", () => {
+  assert.deepEqual(controlStateForDryRun(null, false), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: true,
+    applyDisabled: true,
   });
 });
 

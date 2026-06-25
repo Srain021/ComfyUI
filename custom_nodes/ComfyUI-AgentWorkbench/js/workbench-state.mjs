@@ -3,7 +3,7 @@ export function controlStateForDryRun(lastDryRun, confirmChecked) {
   return {
     needsConfirmation,
     confirmHidden: !needsConfirmation,
-    cancelHidden: !needsConfirmation,
+    cancelHidden: !lastDryRun?.plan,
     applyDisabled: !lastDryRun?.plan || (needsConfirmation && !confirmChecked),
   };
 }
