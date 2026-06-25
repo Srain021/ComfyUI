@@ -721,6 +721,46 @@ def test_rule_planner_clones_node_by_title():
     ]
 
 
+def test_rule_planner_duplicates_selected_nodes():
+    plan = RuleBasedPlanner().plan(
+        "复制选中的节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "KSampler", "title": "KSampler", "selected": True},
+                    {"id": 13, "type": "CLIPTextEncode", "title": "Prompt", "selected": True},
+                    {"id": 14, "type": "VAELoader", "title": "VAE", "selected": False},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.duplicate_node", "payload": {"node_id": 12, "offset": [40, 40], "select": False}},
+        {"type": "graph.duplicate_node", "payload": {"node_id": 13, "offset": [40, 40], "select": False}},
+    ]
+
+
+def test_rule_planner_duplicates_all_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "复制所有 KSampler 节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.duplicate_node", "payload": {"node_id": 9, "offset": [40, 40], "select": False}},
+        {"type": "graph.duplicate_node", "payload": {"node_id": 10, "offset": [40, 40], "select": False}},
+    ]
+
+
 def test_rule_planner_bypasses_selected_node():
     plan = RuleBasedPlanner().plan(
         "绕过这个节点",

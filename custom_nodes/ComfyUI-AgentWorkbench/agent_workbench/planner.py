@@ -534,7 +534,20 @@ def _plan_graph_duplicate_node(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("复制", "克隆", "duplicate", "clone")):
         return None
-    node = _select_node(_graph_nodes(context), text)
+    nodes = _graph_nodes(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
+    if bulk_nodes:
+        return {
+            "summary": f"Duplicate {len(bulk_nodes)} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.duplicate_node",
+                    "payload": {"node_id": node.get("id"), "offset": [40, 40], "select": False},
+                }
+                for node in bulk_nodes
+            ],
+        }
+    node = _select_node(nodes, text)
     if node is None:
         return None
     return {
