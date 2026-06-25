@@ -447,6 +447,30 @@ def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     return rows
 
 
+RESOLUTION_PRESETS = {
+    720: (1280, 720),
+    1080: (1920, 1080),
+}
+
+
+def _size_widgets(node: dict) -> tuple[dict | None, dict | None]:
+    widgets = _node_widgets(node)
+    return _find_widget_by_name(widgets, ("width",)), _find_widget_by_name(widgets, ("height",))
+
+
+def _round_dimension(value: int | float) -> int:
+    return int(round(float(value)))
+
+
+def _current_dimension(widget: dict | None) -> int | None:
+    if widget is None:
+        return None
+    value = widget.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return _round_dimension(value)
+
+
 def _size_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("尺寸", "分辨率", "size", "resolution")):
@@ -454,15 +478,38 @@ def _size_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     value = _extract_value_after_set(text)
     if not value:
         return []
-    match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", value)
-    if not match:
-        return []
-    widgets = _node_widgets(node)
-    width = _find_widget_by_name(widgets, ("width",))
-    height = _find_widget_by_name(widgets, ("height",))
+    width, height = _size_widgets(node)
     if width is None or height is None:
         return []
-    return [(width, _number_value(match.group(1))), (height, _number_value(match.group(2)))]
+    match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", value)
+    if match:
+        return [(width, _number_value(match.group(1))), (height, _number_value(match.group(2)))]
+
+    preset = re.search(r"\b(720|1080)\s*p\b", value, re.IGNORECASE)
+    if preset:
+        preset_width, preset_height = RESOLUTION_PRESETS[int(preset.group(1))]
+        if any(term in lowered or term in text for term in ("竖屏", "portrait", "vertical")):
+            preset_width, preset_height = preset_height, preset_width
+        return [(width, preset_width), (height, preset_height)]
+
+    ratio = re.search(r"(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)", value)
+    if not ratio:
+        return []
+    ratio_width = float(ratio.group(1))
+    ratio_height = float(ratio.group(2))
+    if ratio_width <= 0 or ratio_height <= 0:
+        return []
+    mentions_vertical = any(term in lowered or term in text for term in ("竖屏", "portrait", "vertical"))
+    mentions_horizontal = any(term in lowered or term in text for term in ("横屏", "landscape", "horizontal"))
+    current_width = _current_dimension(width)
+    current_height = _current_dimension(height)
+    if mentions_vertical or (not mentions_horizontal and ratio_width < ratio_height):
+        if current_width is None:
+            return []
+        return [(width, current_width), (height, _round_dimension(current_width * ratio_height / ratio_width))]
+    if current_height is None:
+        return []
+    return [(width, _round_dimension(current_height * ratio_width / ratio_height)), (height, current_height)]
 
 
 def _extract_widget_delta(text: str) -> int | float | None:

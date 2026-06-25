@@ -1128,6 +1128,84 @@ def test_rule_planner_sets_image_size_from_compact_dimensions():
     ]
 
 
+def test_rule_planner_sets_image_size_from_1080p_resolution_label():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的分辨率改成 1080p",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 512},
+                            {"name": "height", "value": 512},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1920}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 1080}},
+    ]
+
+
+def test_rule_planner_sets_vertical_aspect_ratio_from_current_width():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的尺寸改成竖屏 9:16",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 720},
+                            {"name": "height", "value": 720},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 720}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 1280}},
+    ]
+
+
+def test_rule_planner_sets_horizontal_aspect_ratio_from_current_height():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的分辨率改成横屏 16:9",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 720},
+                            {"name": "height", "value": 720},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1280}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 720}},
+    ]
+
+
 def test_rule_planner_adds_node_from_natural_language():
     plan = RuleBasedPlanner().plan("添加一个 KSampler 节点", context={"graph_input": {"nodes": []}})
 
