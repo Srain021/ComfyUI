@@ -2098,6 +2098,72 @@ def test_rule_planner_sets_lora_model_strength_by_alias():
     ]
 
 
+def test_rule_planner_sets_both_lora_strengths_from_combined_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 LoRA 的模型和 CLIP 权重都改成 0.75",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 6,
+                        "type": "LoraLoader",
+                        "title": "LoRA",
+                        "widgets": [
+                            {"name": "lora_name", "value": "old.safetensors"},
+                            {"name": "strength_model", "value": 1.0},
+                            {"name": "strength_clip", "value": 1.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 6, "widget": "strength_model", "value": 0.75},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 6, "widget": "strength_clip", "value": 0.75},
+        },
+    ]
+
+
+def test_rule_planner_sets_both_lora_strengths_from_two_strengths_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 LoRA 的两个强度都改成 0.65",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 6,
+                        "type": "LoraLoader",
+                        "title": "LoRA",
+                        "widgets": [
+                            {"name": "lora_name", "value": "old.safetensors"},
+                            {"name": "strength_model", "value": 1.0},
+                            {"name": "strength_clip", "value": 1.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 6, "widget": "strength_model", "value": 0.65},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 6, "widget": "strength_clip", "value": 0.65},
+        },
+    ]
+
+
 def test_rule_planner_sets_lora_model_by_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把 LoRA 换成 detail.safetensors",

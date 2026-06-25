@@ -664,6 +664,34 @@ def _nodes_matching_widget_hint(nodes: list[dict], text: str) -> list[dict]:
     return [node for node in nodes if _node_mentions_widget_hint(node, text)]
 
 
+def _combined_strength_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("权重", "强度", "strength")):
+        return []
+    mentions_model_and_clip = (
+        any(term in lowered or term in text for term in ("模型", "model"))
+        and "clip" in lowered
+    )
+    mentions_both_strengths = any(
+        term in lowered or term in text
+        for term in ("两个", "兩個", "两种", "兩種", "两边", "兩邊", "both", "dual")
+    )
+    if not mentions_model_and_clip and not mentions_both_strengths:
+        return []
+    value = _extract_value_after_set(text)
+    if not value:
+        return []
+    widgets = _node_widgets(node)
+    model_strength = _find_widget_by_name(widgets, ("strength_model",))
+    clip_strength = _find_widget_by_name(widgets, ("strength_clip",))
+    if model_strength is None or clip_strength is None:
+        return []
+    return [
+        (model_strength, _coerce_widget_value(value, model_strength)),
+        (clip_strength, _coerce_widget_value(value, clip_strength)),
+    ]
+
+
 def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     hints = _widget_hint_map(node)
     if not hints:
@@ -941,7 +969,9 @@ def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
     if size_assignments:
         assignments = size_assignments
     else:
-        assignments = _widget_assignments(text, node)
+        assignments = _combined_strength_assignments(text, node)
+        if not assignments:
+            assignments = _widget_assignments(text, node)
     if assignments:
         return [
             {
