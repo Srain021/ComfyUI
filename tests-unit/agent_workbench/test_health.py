@@ -104,9 +104,23 @@ def test_frontend_exposes_plan_first_operator_controls():
     assert "requires_confirmation" in script
     assert "plan.confirmed" in script
 
+
 def test_frontend_styles_plan_apply_and_confirmation_states():
     stylesheet = (AGENT_ROOT / "js" / "agent-workbench.css").read_text()
 
     assert ".agent-workbench-actions" in stylesheet
     assert "#agent-workbench-panel button:disabled" in stylesheet
     assert ".agent-workbench-confirm[hidden]" in stylesheet
+
+
+def test_frontend_wires_graph_actions_after_server_approval():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+    graph_actions = (AGENT_ROOT / "js" / "graph-actions.js").read_text()
+
+    assert 'import { applyGraphActions } from "./graph-actions.js";' in script
+    assert "if (result.ok)" in script
+    assert "result.browser_applied = applyGraphActions(lastDryRun.plan.actions)" in script
+    assert "browser_error" in script
+    assert 'action.type === "graph.set_widget"' in graph_actions
+    assert "app.graph.getNodeById" in graph_actions
+    assert "app.graph.setDirtyCanvas(true, true)" in graph_actions

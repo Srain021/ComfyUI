@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { applyGraphActions } from "./graph-actions.js";
 
 const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
 const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
@@ -141,6 +142,14 @@ function createWorkbenchPanel() {
       plan,
       approved_hash: lastDryRun.plan.plan_hash,
     });
+    if (result.ok) {
+      try {
+        result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
+      } catch (error) {
+        result.ok = false;
+        result.browser_error = error instanceof Error ? error.message : String(error);
+      }
+    }
     renderJson(output, result);
   });
 }
