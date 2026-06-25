@@ -4,6 +4,7 @@ import re
 
 MAX_PLANNER_GRAPH_NODES = 500
 MAX_PLANNER_WIDGETS_PER_NODE = 64
+MAX_PLANNER_SLOTS_PER_NODE = 64
 
 
 def _context_plan(message: str) -> dict:
@@ -256,10 +257,117 @@ def _graph_contains_node(nodes: list[dict], node_id: int) -> bool:
     return any(str(node.get("id")) == str(node_id) for node in nodes)
 
 
+def _slot_rows(node: dict, slot_key: str) -> list[dict]:
+    slots = node.get(slot_key)
+    if not isinstance(slots, list):
+        return []
+    return [
+        slot
+        for slot in slots[:MAX_PLANNER_SLOTS_PER_NODE]
+        if isinstance(slot, dict)
+    ]
+
+
+def _find_node_for_phrase(nodes: list[dict], phrase: str) -> dict | None:
+    cleaned = _strip_value(phrase).removesuffix("节点").removesuffix("node").strip()
+    by_id = _find_node_by_id(nodes, _extract_node_id(cleaned))
+    if by_id is not None:
+        return by_id
+    lowered = cleaned.lower()
+    matches = []
+    for node in nodes:
+        for key in ("title", "type"):
+            value = node.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            value_lower = value.lower()
+            if value_lower == lowered:
+                matches.append((len(value_lower) + 1000, node))
+            elif value_lower in lowered or lowered in value_lower:
+                matches.append((len(value_lower), node))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0], reverse=True)
+    return matches[0][1]
+
+
+def _slot_index_for_hint(node: dict, slot_key: str, hint: str | None) -> int | None:
+    slots = _slot_rows(node, slot_key)
+    if hint is None:
+        return 0
+    cleaned = _strip_value(hint)
+    if cleaned.isdigit():
+        return int(cleaned)
+    lowered = cleaned.lower()
+    for index, slot in enumerate(slots):
+        name = slot.get("name")
+        if isinstance(name, str) and name.lower() == lowered:
+            return index
+    for index, slot in enumerate(slots):
+        slot_type = slot.get("type")
+        if isinstance(slot_type, str) and slot_type.lower() == lowered:
+            return index
+    for index, slot in enumerate(slots):
+        name = slot.get("name")
+        if isinstance(name, str) and (name.lower() in lowered or lowered in name.lower()):
+            return index
+    return None
+
+
+def _slot_connect_plan_from_phrases(
+    nodes: list[dict],
+    origin_phrase: str,
+    origin_slot_hint: str,
+    target_phrase: str,
+    target_slot_hint: str,
+) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase)
+    target = _find_node_for_phrase(nodes, target_phrase)
+    if origin is None or target is None:
+        return None
+    origin_slot = _slot_index_for_hint(origin, "outputs", origin_slot_hint)
+    target_slot = _slot_index_for_hint(target, "inputs", target_slot_hint)
+    if origin_slot is None or target_slot is None:
+        return None
+    return {
+        "summary": f"Connect node {origin.get('id')} to node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": origin_slot,
+                    "target_node_id": target.get("id"),
+                    "target_slot": target_slot,
+                },
+            }
+        ],
+    }
+
+
 def _plan_graph_connect(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("连接", "连到", "接到", "connect")):
         return None
+    nodes = _graph_nodes(context)
+    slot_patterns = (
+        r"把\s+(.+?)\s+的\s+([A-Za-z0-9_ -]+)\s*(?:连接到|连到|接到)\s+(.+?)\s+的\s+([A-Za-z0-9_ -]+)$",
+        r"\bconnect\s+(.+?)\s+([A-Za-z0-9_ -]+)\s+(?:to|into)\s+(.+?)\s+([A-Za-z0-9_ -]+)$",
+    )
+    for pattern in slot_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _slot_connect_plan_from_phrases(
+            nodes,
+            match.group(1),
+            match.group(2),
+            match.group(3),
+            match.group(4),
+        )
+        if plan is not None:
+            return plan
+
     patterns = (
         r"(\d+)\s*号?\s*节点.*?(?:连接|连到|接到).*?(\d+)\s*号?\s*节点",
         r"\bconnect\s+(?:node\s+)?(\d+)\s+(?:to|into)\s+(?:node\s+)?(\d+)\b",
@@ -270,7 +378,6 @@ def _plan_graph_connect(text: str, context: dict) -> dict | None:
             continue
         origin_node_id = int(match.group(1))
         target_node_id = int(match.group(2))
-        nodes = _graph_nodes(context)
         if nodes and (
             not _graph_contains_node(nodes, origin_node_id)
             or not _graph_contains_node(nodes, target_node_id)

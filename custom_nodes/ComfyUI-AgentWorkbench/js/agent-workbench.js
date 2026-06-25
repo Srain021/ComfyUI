@@ -6,6 +6,7 @@ const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
 const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
 const MAX_GRAPH_NODES = 500;
 const MAX_GRAPH_LINKS = 1000;
+const MAX_NODE_SLOTS = 64;
 const MAX_WIDGET_VALUE_LENGTH = 500;
 
 function loadWorkbenchStylesheet() {
@@ -27,6 +28,13 @@ function boundedValue(value) {
   return value;
 }
 
+function slotRows(slots) {
+  return (slots || []).slice(0, MAX_NODE_SLOTS).map((slot) => ({
+    name: slot.name,
+    type: slot.type,
+  }));
+}
+
 function currentGraphSnapshot() {
   const graph = app.graph;
   const links = graph?.links || [];
@@ -42,6 +50,8 @@ function currentGraphSnapshot() {
         name: widget.name,
         value: boundedValue(widget.value),
       })),
+      inputs: slotRows(node.inputs),
+      outputs: slotRows(node.outputs),
     })),
     links: linkRows.slice(0, MAX_GRAPH_LINKS).filter(Boolean).map((link) => ({
       id: link.id,

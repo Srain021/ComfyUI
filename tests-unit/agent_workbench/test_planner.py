@@ -157,6 +157,84 @@ def test_rule_planner_connects_two_nodes_by_id():
     ]
 
 
+def test_rule_planner_connects_nodes_by_title_and_slot_names():
+    plan = RuleBasedPlanner().plan(
+        "把 Checkpoint 的 MODEL 连接到 KSampler 的 model",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 1,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Checkpoint",
+                        "outputs": [
+                            {"name": "MODEL", "type": "MODEL"},
+                            {"name": "CLIP", "type": "CLIP"},
+                            {"name": "VAE", "type": "VAE"},
+                        ],
+                    },
+                    {
+                        "id": 2,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [
+                            {"name": "model", "type": "MODEL"},
+                            {"name": "positive", "type": "CONDITIONING"},
+                            {"name": "negative", "type": "CONDITIONING"},
+                        ],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.connect",
+            "payload": {
+                "origin_node_id": 1,
+                "origin_slot": 0,
+                "target_node_id": 2,
+                "target_slot": 0,
+            },
+        }
+    ]
+
+
+def test_rule_planner_connects_clip_to_prompt_by_slot_names():
+    plan = RuleBasedPlanner().plan(
+        "把 Checkpoint 的 CLIP 连到 Positive Prompt 的 clip",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 1,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Checkpoint",
+                        "outputs": [
+                            {"name": "MODEL", "type": "MODEL"},
+                            {"name": "CLIP", "type": "CLIP"},
+                        ],
+                    },
+                    {
+                        "id": 3,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "inputs": [{"name": "clip", "type": "CLIP"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"][0]["payload"] == {
+        "origin_node_id": 1,
+        "origin_slot": 1,
+        "target_node_id": 3,
+        "target_slot": 0,
+    }
+
+
 def test_rule_planner_plans_restart_container():
     plan = RuleBasedPlanner().plan("重启 ComfyUI 容器", context={})
 
