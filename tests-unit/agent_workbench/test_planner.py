@@ -1031,6 +1031,85 @@ def test_rule_planner_sets_sampler_cfg_by_prompt_relevance_alias():
     ]
 
 
+def test_rule_planner_sets_video_frame_rate_by_fps_alias_independent_of_widget_order():
+    plan = RuleBasedPlanner().plan(
+        "把 Video Combine 的 fps 改成 24",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "frame_rate", "value": 8},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 42, "widget": "frame_rate", "value": 24}}
+    ]
+
+
+def test_rule_planner_sets_video_frame_rate_by_chinese_alias_independent_of_widget_order():
+    plan = RuleBasedPlanner().plan(
+        "把 Video Combine 的帧率改成 24",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "frame_rate", "value": 8},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 42, "widget": "frame_rate", "value": 24}}
+    ]
+
+
+def test_rule_planner_sets_guidance_scale_widget_by_guidance_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 LTX Conditioning 的 guidance scale 改成 4.5",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 43,
+                        "type": "LTXVConditioning",
+                        "title": "LTX Conditioning",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "num_frames", "value": 97},
+                            {"name": "guidance_scale", "value": 3.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 43, "widget": "guidance_scale", "value": 4.5},
+        }
+    ]
+
+
 def test_rule_planner_sets_sampler_name_by_chinese_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把采样器改成 euler",
