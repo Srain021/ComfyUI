@@ -3,6 +3,7 @@ import re
 
 
 MAX_PLANNER_GRAPH_NODES = 500
+MAX_PLANNER_GRAPH_LINKS = 1000
 MAX_PLANNER_WIDGETS_PER_NODE = 64
 MAX_PLANNER_SLOTS_PER_NODE = 64
 
@@ -124,6 +125,16 @@ def _graph_nodes(context: dict) -> list[dict]:
     return [node for node in nodes[:MAX_PLANNER_GRAPH_NODES] if isinstance(node, dict)]
 
 
+def _graph_links(context: dict) -> list[dict]:
+    graph = context.get("graph_input") if isinstance(context, dict) else None
+    if not isinstance(graph, dict):
+        return []
+    links = graph.get("links")
+    if not isinstance(links, list):
+        return []
+    return [link for link in links[:MAX_PLANNER_GRAPH_LINKS] if isinstance(link, dict)]
+
+
 def _node_widgets(node: dict) -> list[dict]:
     widgets = node.get("widgets")
     if not isinstance(widgets, list):
@@ -238,13 +249,86 @@ def _node_looks_like_prompt_text_node(node: dict) -> bool:
     return "prompt" in label or "提示词" in label or "cliptextencode" in compact
 
 
+def _prompt_role_from_text(text: str) -> str | None:
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("正向", "正面", "positive")):
+        return "positive"
+    if any(term in lowered or term in text for term in ("负面", "反向", "负向", "negative")):
+        return "negative"
+    return None
+
+
+def _nodes_by_id(nodes: list[dict]) -> dict[str, dict]:
+    return {str(node.get("id")): node for node in nodes if node.get("id") is not None}
+
+
+def _link_slot_index(link: dict, key: str) -> int | None:
+    value = link.get(key)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _input_slot_role(node: dict, slot_index: int | None) -> str | None:
+    if slot_index is None:
+        return None
+    slots = node.get("inputs")
+    if not isinstance(slots, list) or slot_index < 0 or slot_index >= len(slots):
+        return None
+    slot = slots[slot_index]
+    if not isinstance(slot, dict):
+        return None
+    name = slot.get("name")
+    if not isinstance(name, str):
+        return None
+    lowered = name.lower()
+    if "positive" in lowered or "正向" in name or "正面" in name:
+        return "positive"
+    if "negative" in lowered or "负面" in name or "反向" in name or "负向" in name:
+        return "negative"
+    return None
+
+
+def _prompt_nodes_by_connection_role(
+    nodes: list[dict],
+    links: list[dict],
+    role: str,
+) -> list[dict]:
+    by_id = _nodes_by_id(nodes)
+    rows = []
+    seen = set()
+    for link in links:
+        target = by_id.get(str(link.get("target_id")))
+        origin = by_id.get(str(link.get("origin_id")))
+        if target is None or origin is None:
+            continue
+        if _input_slot_role(target, _link_slot_index(link, "target_slot")) != role:
+            continue
+        if not _node_looks_like_prompt_text_node(origin):
+            continue
+        origin_id = origin.get("id")
+        if origin_id in seen:
+            continue
+        seen.add(origin_id)
+        rows.append(origin)
+    return rows
+
+
 def _generic_prompt_text_nodes(nodes: list[dict], text: str) -> list[dict]:
     if not _message_mentions_generic_prompt(text):
         return []
     return [node for node in nodes if _node_looks_like_prompt_text_node(node)]
 
 
-def _find_node_by_semantic_label(nodes: list[dict], text: str) -> dict | None:
+def _find_node_by_semantic_label(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> dict | None:
     lowered = text.lower()
     for triggers, label_candidates in NODE_LABEL_ALIASES:
         if not any(trigger in lowered or trigger in text for trigger in triggers):
@@ -259,6 +343,11 @@ def _find_node_by_semantic_label(nodes: list[dict], text: str) -> dict | None:
         if matches:
             matches.sort(key=lambda item: item[0], reverse=True)
             return matches[0][1]
+    role = _prompt_role_from_text(text)
+    if role is not None:
+        linked_prompt_nodes = _prompt_nodes_by_connection_role(nodes, links or [], role)
+        if len(linked_prompt_nodes) == 1:
+            return linked_prompt_nodes[0]
     generic_prompt_nodes = _generic_prompt_text_nodes(nodes, text)
     if len(generic_prompt_nodes) == 1:
         return generic_prompt_nodes[0]
@@ -285,7 +374,7 @@ def _find_node_by_label(nodes: list[dict], text: str) -> dict | None:
     return matches[0][1]
 
 
-def _select_node(nodes: list[dict], text: str) -> dict | None:
+def _select_node(nodes: list[dict], text: str, links: list[dict] | None = None) -> dict | None:
     explicit = _find_node_by_id(nodes, _extract_node_id(text))
     if explicit is not None:
         return explicit
@@ -294,7 +383,7 @@ def _select_node(nodes: list[dict], text: str) -> dict | None:
     if _message_mentions_current_node(text) and len(selected) == 1:
         return selected[0]
 
-    semantic = _find_node_by_semantic_label(nodes, text)
+    semantic = _find_node_by_semantic_label(nodes, text, links)
     if semantic is not None:
         return semantic
 
@@ -319,7 +408,11 @@ def _message_mentions_selected_nodes(text: str) -> bool:
     return any(term in lowered or term in text for term in ("选中", "选择的", "selected", "current selection"))
 
 
-def _find_nodes_by_semantic_label(nodes: list[dict], text: str) -> list[dict]:
+def _find_nodes_by_semantic_label(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> list[dict]:
     lowered = text.lower()
     for triggers, label_candidates in NODE_LABEL_ALIASES:
         if not any(trigger in lowered or trigger in text for trigger in triggers):
@@ -330,6 +423,11 @@ def _find_nodes_by_semantic_label(nodes: list[dict], text: str) -> list[dict]:
             if any(candidate in label_lower for candidate in label_candidates):
                 matches.append(node)
         return matches
+    role = _prompt_role_from_text(text)
+    if role is not None:
+        linked_prompt_nodes = _prompt_nodes_by_connection_role(nodes, links or [], role)
+        if linked_prompt_nodes:
+            return linked_prompt_nodes
     generic_prompt_nodes = _generic_prompt_text_nodes(nodes, text)
     if generic_prompt_nodes:
         return generic_prompt_nodes
@@ -350,10 +448,14 @@ def _find_nodes_by_label(nodes: list[dict], text: str) -> list[dict]:
     return matches
 
 
-def _select_all_matching_nodes(nodes: list[dict], text: str) -> list[dict]:
+def _select_all_matching_nodes(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> list[dict]:
     if not _message_mentions_all_nodes(text):
         return []
-    semantic = _find_nodes_by_semantic_label(nodes, text)
+    semantic = _find_nodes_by_semantic_label(nodes, text, links)
     if semantic:
         return semantic
     return _find_nodes_by_label(nodes, text)
@@ -372,11 +474,15 @@ def _select_selected_matching_nodes(nodes: list[dict], text: str) -> list[dict]:
     return selected
 
 
-def _select_bulk_nodes(nodes: list[dict], text: str) -> list[dict]:
+def _select_bulk_nodes(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> list[dict]:
     selected = _select_selected_matching_nodes(nodes, text)
     if selected:
         return selected
-    return _select_all_matching_nodes(nodes, text)
+    return _select_all_matching_nodes(nodes, text, links)
 
 
 WIDGET_ALIASES = (
@@ -793,7 +899,8 @@ def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
 
 def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         actions = []
         for item in bulk_nodes:
@@ -816,7 +923,7 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
                     "actions": actions,
                 }
 
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         widget_hint_nodes = _nodes_matching_widget_hint(nodes, text)
         if len(widget_hint_nodes) != 1:
@@ -854,8 +961,9 @@ def _plan_graph_copy_widget_value(text: str, context: dict) -> dict | None:
         return None
     source_phrase, target_phrase = phrases
     nodes = _graph_nodes(context)
-    source = _select_node(nodes, source_phrase)
-    target = _select_node(nodes, target_phrase)
+    links = _graph_links(context)
+    source = _select_node(nodes, source_phrase, links)
+    target = _select_node(nodes, target_phrase, links)
     if source is None or target is None or source.get("id") == target.get("id"):
         return None
     source_widget = _select_widget(source, source_phrase)
@@ -884,7 +992,8 @@ def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     if _looks_like_widget_text_removal(text):
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         return {
             "summary": f"Delete {len(bulk_nodes)} graph node(s)",
@@ -893,7 +1002,7 @@ def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
                 for node in bulk_nodes
             ],
         }
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     return {
@@ -907,7 +1016,8 @@ def _plan_graph_duplicate_node(text: str, context: dict) -> dict | None:
     if not any(term in lowered or term in text for term in ("复制", "克隆", "duplicate", "clone")):
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         return {
             "summary": f"Duplicate {len(bulk_nodes)} graph node(s)",
@@ -919,7 +1029,7 @@ def _plan_graph_duplicate_node(text: str, context: dict) -> dict | None:
                 for node in bulk_nodes
             ],
         }
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     return {
@@ -999,13 +1109,14 @@ def _plan_graph_set_color(text: str, context: dict) -> dict | None:
     if color is None:
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         return {
             "summary": f"Color {len(bulk_nodes)} graph node(s)",
             "actions": [_set_color_action(node, color) for node in bulk_nodes],
         }
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     return {
@@ -1032,7 +1143,8 @@ def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
     if mode is None:
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         return {
             "summary": f"Set {len(bulk_nodes)} graph node(s) mode to {mode}",
@@ -1041,7 +1153,7 @@ def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
                 for node in bulk_nodes
             ],
         }
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     return {
@@ -1081,7 +1193,8 @@ def _plan_graph_set_title(text: str, context: dict) -> dict | None:
     if not title:
         return None
     nodes = _graph_nodes(context)
-    node = _select_node(nodes, text)
+    links = _graph_links(context)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     return {
@@ -1184,7 +1297,7 @@ def _plan_graph_align_nodes(text: str, context: dict) -> dict | None:
     axis = _alignment_axis(text)
     if axis is None:
         return None
-    nodes = _select_bulk_nodes(_graph_nodes(context), text)
+    nodes = _select_bulk_nodes(_graph_nodes(context), text, _graph_links(context))
     if len(nodes) < 2:
         return None
     positions = [_node_position(node) for node in nodes]
@@ -1222,7 +1335,7 @@ def _plan_graph_distribute_nodes(text: str, context: dict) -> dict | None:
     axis = _distribution_axis(text)
     if axis is None:
         return None
-    nodes = _select_bulk_nodes(_graph_nodes(context), text)
+    nodes = _select_bulk_nodes(_graph_nodes(context), text, _graph_links(context))
     if len(nodes) < 3:
         return None
     axis_index = 0 if axis == "horizontal" else 1
@@ -1253,7 +1366,8 @@ def _plan_graph_set_position(text: str, context: dict) -> dict | None:
     if not any(term in lowered or term in text for term in ("移动", "移到", "挪", "move")):
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_bulk_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         delta = _extract_move_delta(text)
         if delta is not None:
@@ -1273,7 +1387,7 @@ def _plan_graph_set_position(text: str, context: dict) -> dict | None:
                 "summary": f"Move {len(bulk_nodes)} graph node(s)",
                 "actions": actions,
             }
-    node = _select_node(nodes, text)
+    node = _select_node(nodes, text, links)
     if node is None:
         return None
     pos = _extract_absolute_position(text)
@@ -1298,7 +1412,11 @@ def _graph_select_focus(text: str) -> bool | None:
     return None
 
 
-def _select_node_for_selection(nodes: list[dict], text: str) -> dict | None:
+def _select_node_for_selection(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> dict | None:
     explicit = _find_node_by_id(nodes, _extract_node_id(text))
     if explicit is not None:
         return explicit
@@ -1307,7 +1425,7 @@ def _select_node_for_selection(nodes: list[dict], text: str) -> dict | None:
     if labelled is not None:
         return labelled
 
-    return _select_node(nodes, text)
+    return _select_node(nodes, text, links)
 
 
 def _plan_graph_select_node(text: str, context: dict) -> dict | None:
@@ -1317,7 +1435,8 @@ def _plan_graph_select_node(text: str, context: dict) -> dict | None:
     if focus is False and _extract_value_after_set(text):
         return None
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_all_matching_nodes(nodes, text)
+    links = _graph_links(context)
+    bulk_nodes = _select_all_matching_nodes(nodes, text, links)
     if len(bulk_nodes) >= 2:
         return {
             "summary": f"Select {len(bulk_nodes)} graph node(s)",
@@ -1331,7 +1450,7 @@ def _plan_graph_select_node(text: str, context: dict) -> dict | None:
                 }
             ],
         }
-    node = _select_node_for_selection(nodes, text)
+    node = _select_node_for_selection(nodes, text, links)
     if node is None:
         return None
     return {
@@ -1394,7 +1513,11 @@ def _slot_rows(node: dict, slot_key: str) -> list[dict]:
     ]
 
 
-def _find_node_for_phrase(nodes: list[dict], phrase: str) -> dict | None:
+def _find_node_for_phrase(
+    nodes: list[dict],
+    phrase: str,
+    links: list[dict] | None = None,
+) -> dict | None:
     cleaned = _strip_value(phrase).removesuffix("节点").removesuffix("node").strip()
     by_id = _find_node_by_id(nodes, _extract_node_id(cleaned))
     if by_id is not None:
@@ -1403,7 +1526,7 @@ def _find_node_for_phrase(nodes: list[dict], phrase: str) -> dict | None:
         selected = _selected_nodes(nodes)
         if len(selected) == 1:
             return selected[0]
-    semantic = _find_node_by_semantic_label(nodes, cleaned)
+    semantic = _find_node_by_semantic_label(nodes, cleaned, links)
     if semantic is not None:
         return semantic
     labelled = _find_node_by_label(nodes, cleaned)
@@ -1617,10 +1740,15 @@ def _plan_graph_connect(text: str, context: dict) -> dict | None:
     return None
 
 
-def _disconnect_input_plan(nodes: list[dict], target_phrase: str, slot_hint: str) -> dict | None:
-    target = _select_node(nodes, target_phrase)
+def _disconnect_input_plan(
+    nodes: list[dict],
+    links: list[dict],
+    target_phrase: str,
+    slot_hint: str,
+) -> dict | None:
+    target = _select_node(nodes, target_phrase, links)
     if target is None:
-        target = _find_node_for_phrase(nodes, target_phrase)
+        target = _find_node_for_phrase(nodes, target_phrase, links)
     if target is None:
         return None
     target_slot = _slot_index_for_hint(target, "inputs", slot_hint)
@@ -1640,8 +1768,13 @@ def _disconnect_input_plan(nodes: list[dict], target_phrase: str, slot_hint: str
     }
 
 
-def _disconnect_output_plan(nodes: list[dict], origin_phrase: str, slot_hint: str) -> dict | None:
-    origin = _find_node_for_phrase(nodes, origin_phrase)
+def _disconnect_output_plan(
+    nodes: list[dict],
+    links: list[dict],
+    origin_phrase: str,
+    slot_hint: str,
+) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase, links)
     if origin is None:
         return None
     origin_slot = _slot_index_for_hint(origin, "outputs", slot_hint)
@@ -1661,9 +1794,14 @@ def _disconnect_output_plan(nodes: list[dict], origin_phrase: str, slot_hint: st
     }
 
 
-def _disconnect_pair_plan(nodes: list[dict], origin_phrase: str, target_phrase: str) -> dict | None:
-    origin = _find_node_for_phrase(nodes, origin_phrase)
-    target = _find_node_for_phrase(nodes, target_phrase)
+def _disconnect_pair_plan(
+    nodes: list[dict],
+    links: list[dict],
+    origin_phrase: str,
+    target_phrase: str,
+) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase, links)
+    target = _find_node_for_phrase(nodes, target_phrase, links)
     if origin is None or target is None:
         return None
     return {
@@ -1680,10 +1818,15 @@ def _disconnect_pair_plan(nodes: list[dict], origin_phrase: str, target_phrase: 
     }
 
 
-def _disconnect_all_plan(nodes: list[dict], node_phrase: str, scope: str) -> dict | None:
-    node = _select_node(nodes, node_phrase)
+def _disconnect_all_plan(
+    nodes: list[dict],
+    links: list[dict],
+    node_phrase: str,
+    scope: str,
+) -> dict | None:
+    node = _select_node(nodes, node_phrase, links)
     if node is None:
-        node = _find_node_for_phrase(nodes, node_phrase)
+        node = _find_node_for_phrase(nodes, node_phrase, links)
     if node is None:
         return None
     payload_key = {
@@ -1707,6 +1850,7 @@ def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
     if not any(term in lowered or term in text for term in ("断开", "清空", "移除连接", "disconnect")):
         return None
     nodes = _graph_nodes(context)
+    links = _graph_links(context)
     all_patterns = (
         (r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*所有\s*(?:输入|inputs?)$", "inputs"),
         (r"\bdisconnect\s+all\s+inputs?\s+(?:on|from)\s+(.+?)$", "inputs"),
@@ -1719,7 +1863,7 @@ def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
         match = re.search(pattern, text, re.IGNORECASE)
         if not match:
             continue
-        plan = _disconnect_all_plan(nodes, match.group(1), scope)
+        plan = _disconnect_all_plan(nodes, links, match.group(1), scope)
         if plan is not None:
             return plan
     pair_patterns = (
@@ -1730,7 +1874,7 @@ def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
         match = re.search(pattern, text, re.IGNORECASE)
         if not match:
             continue
-        plan = _disconnect_pair_plan(nodes, match.group(1), match.group(2))
+        plan = _disconnect_pair_plan(nodes, links, match.group(1), match.group(2))
         if plan is not None:
             return plan
     output_patterns = (
@@ -1741,7 +1885,7 @@ def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
         match = re.search(pattern, text, re.IGNORECASE)
         if not match:
             continue
-        plan = _disconnect_output_plan(nodes, match.group(1), match.group(2))
+        plan = _disconnect_output_plan(nodes, links, match.group(1), match.group(2))
         if plan is not None:
             return plan
     patterns = (
@@ -1752,7 +1896,7 @@ def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
         match = re.search(pattern, text, re.IGNORECASE)
         if not match:
             continue
-        plan = _disconnect_input_plan(nodes, match.group(1), match.group(2))
+        plan = _disconnect_input_plan(nodes, links, match.group(1), match.group(2))
         if plan is not None:
             return plan
     return None
