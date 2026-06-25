@@ -431,6 +431,20 @@ def _widget_hint_map(node: dict) -> dict[str, dict]:
     return hints
 
 
+def _node_mentions_widget_hint(node: dict, text: str) -> bool:
+    lowered = text.lower()
+    for hint in _widget_hint_map(node):
+        if hint in {"text", "文本", "内容"}:
+            continue
+        if hint in lowered or hint in text:
+            return True
+    return False
+
+
+def _nodes_matching_widget_hint(nodes: list[dict], text: str) -> list[dict]:
+    return [node for node in nodes if _node_mentions_widget_hint(node, text)]
+
+
 def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     hints = _widget_hint_map(node)
     if not hints:
@@ -772,9 +786,24 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
                 "actions": actions,
             }
 
+    if _message_mentions_all_nodes(text):
+        widget_hint_nodes = _nodes_matching_widget_hint(nodes, text)
+        if widget_hint_nodes:
+            actions = []
+            for item in widget_hint_nodes:
+                actions.extend(_widget_edit_actions_for_node(text, item))
+            if actions:
+                return {
+                    "summary": f"Set widget(s) on {len(widget_hint_nodes)} matching node(s)",
+                    "actions": actions,
+                }
+
     node = _select_node(nodes, text)
     if node is None:
-        return None
+        widget_hint_nodes = _nodes_matching_widget_hint(nodes, text)
+        if len(widget_hint_nodes) != 1:
+            return None
+        node = widget_hint_nodes[0]
     actions = _widget_edit_actions_for_node(text, node)
     if not actions:
         return None

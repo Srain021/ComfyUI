@@ -896,6 +896,100 @@ def test_rule_planner_sets_multiple_widgets_on_same_node():
     ]
 
 
+def test_rule_planner_sets_unique_widget_by_parameter_name_without_node_name():
+    plan = RuleBasedPlanner().plan(
+        "把步数调到 30",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                        ],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 30}}
+    ]
+
+
+def test_rule_planner_sets_all_matching_widgets_by_parameter_name_without_node_name():
+    plan = RuleBasedPlanner().plan(
+        "把所有步数调成 24",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "steps", "value": 20}],
+                    },
+                    {
+                        "id": 10,
+                        "type": "KSampler",
+                        "title": "Refiner KSampler",
+                        "widgets": [{"name": "steps", "value": 12}],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 24}},
+        {"type": "graph.set_widget", "payload": {"node_id": 10, "widget": "steps", "value": 24}},
+    ]
+
+
+def test_rule_planner_avoids_parameter_only_edit_when_multiple_nodes_match_without_all():
+    plan = RuleBasedPlanner().plan(
+        "把步数调到 30",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "steps", "value": 20}],
+                    },
+                    {
+                        "id": 10,
+                        "type": "KSampler",
+                        "title": "Refiner KSampler",
+                        "widgets": [{"name": "steps", "value": 12}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "context.collect", "payload": {"message": "把步数调到 30"}}
+    ]
+
+
 def test_rule_planner_randomizes_seed_control_on_selected_sampler():
     plan = RuleBasedPlanner().plan(
         "把这个 KSampler 的种子随机化",
