@@ -196,6 +196,11 @@ def _message_mentions_all_nodes(text: str) -> bool:
     return any(term in lowered or term in text for term in ("所有", "全部", "all", "every"))
 
 
+def _message_mentions_selected_nodes(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered or term in text for term in ("选中", "选择的", "selected", "current selection"))
+
+
 def _find_nodes_by_semantic_label(nodes: list[dict], text: str) -> list[dict]:
     lowered = text.lower()
     for triggers, label_candidates in NODE_LABEL_ALIASES:
@@ -231,6 +236,26 @@ def _select_all_matching_nodes(nodes: list[dict], text: str) -> list[dict]:
     if semantic:
         return semantic
     return _find_nodes_by_label(nodes, text)
+
+
+def _select_selected_matching_nodes(nodes: list[dict], text: str) -> list[dict]:
+    selected = _selected_nodes(nodes)
+    if len(selected) <= 1 or not _message_mentions_selected_nodes(text):
+        return []
+    semantic = _find_nodes_by_semantic_label(selected, text)
+    if semantic:
+        return semantic
+    labelled = _find_nodes_by_label(selected, text)
+    if labelled:
+        return labelled
+    return selected
+
+
+def _select_bulk_nodes(nodes: list[dict], text: str) -> list[dict]:
+    selected = _select_selected_matching_nodes(nodes, text)
+    if selected:
+        return selected
+    return _select_all_matching_nodes(nodes, text)
 
 
 WIDGET_ALIASES = (
@@ -436,7 +461,7 @@ def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
 
 def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     nodes = _graph_nodes(context)
-    bulk_nodes = _select_all_matching_nodes(nodes, text)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
     if bulk_nodes:
         actions = []
         for item in bulk_nodes:
@@ -491,6 +516,15 @@ def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
     if mode is None:
         return None
     nodes = _graph_nodes(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
+    if bulk_nodes:
+        return {
+            "summary": f"Set {len(bulk_nodes)} graph node(s) mode to {mode}",
+            "actions": [
+                {"type": "graph.set_mode", "payload": {"node_id": node.get("id"), "mode": mode}}
+                for node in bulk_nodes
+            ],
+        }
     node = _select_node(nodes, text)
     if node is None:
         return None

@@ -323,6 +323,51 @@ def test_rule_planner_adjusts_widget_on_all_matching_nodes():
     ]
 
 
+def test_rule_planner_sets_widget_on_selected_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把选中的 KSampler 的 steps 改成 32",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "selected": True,
+                        "widgets": [{"name": "steps", "value": 20}],
+                    },
+                    {
+                        "id": 10,
+                        "type": "KSampler",
+                        "title": "Refiner KSampler",
+                        "selected": True,
+                        "widgets": [{"name": "steps", "value": 12}],
+                    },
+                    {
+                        "id": 11,
+                        "type": "KSampler",
+                        "title": "Unselected KSampler",
+                        "selected": False,
+                        "widgets": [{"name": "steps", "value": 8}],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 32}},
+        {"type": "graph.set_widget", "payload": {"node_id": 10, "widget": "steps", "value": 32}},
+    ]
+
+
 def test_rule_planner_adds_checkpoint_node_with_initial_model_alias():
     plan = RuleBasedPlanner().plan(
         "添加一个 CheckpointLoaderSimple 节点，模型改成 dreamshaper.safetensors",
@@ -593,6 +638,26 @@ def test_rule_planner_enables_node_by_id():
 
     assert plan["actions"] == [
         {"type": "graph.set_mode", "payload": {"node_id": 12, "mode": "always"}}
+    ]
+
+
+def test_rule_planner_sets_mode_on_selected_nodes():
+    plan = RuleBasedPlanner().plan(
+        "禁用选中的节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "KSampler", "title": "KSampler", "selected": True},
+                    {"id": 13, "type": "CLIPTextEncode", "title": "Prompt", "selected": True},
+                    {"id": 14, "type": "VAELoader", "title": "VAE", "selected": False},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_mode", "payload": {"node_id": 12, "mode": "mute"}},
+        {"type": "graph.set_mode", "payload": {"node_id": 13, "mode": "mute"}},
     ]
 
 
