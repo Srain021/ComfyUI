@@ -195,7 +195,19 @@ NODE_LABEL_ALIASES = (
         ("positive prompt", "positive"),
     ),
     (
-        ("负面提示词", "反向提示词", "负向提示词", "负面 prompt", "负面prompt", "negative prompt", "negative"),
+        (
+            "负面提示词",
+            "反向提示词",
+            "负向提示词",
+            "负面 prompt",
+            "负面prompt",
+            "反向 prompt",
+            "反向prompt",
+            "负向 prompt",
+            "负向prompt",
+            "negative prompt",
+            "negative",
+        ),
         ("negative prompt", "negative"),
     ),
     (

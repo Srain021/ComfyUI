@@ -444,6 +444,70 @@ def test_rule_planner_sets_negative_prompt_by_semantic_alias():
     ]
 
 
+def test_rule_planner_sets_negative_prompt_by_semantic_alias_even_when_positive_is_selected():
+    plan = RuleBasedPlanner().plan(
+        "把反向 prompt 节点改成 blurry, low quality",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "blurry, low quality"},
+        }
+    ]
+
+
+def test_rule_planner_sets_positive_prompt_by_semantic_alias_even_when_negative_is_selected():
+    plan = RuleBasedPlanner().plan(
+        "把正向 prompt 节点改成 cinematic lighting",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "cinematic lighting"},
+        }
+    ]
+
+
 def test_rule_planner_sets_positive_and_negative_prompts_from_one_message():
     plan = RuleBasedPlanner().plan(
         "把正向提示词改成 neon skyline，负面提示词改成 blurry, watermark",
