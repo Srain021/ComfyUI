@@ -223,6 +223,10 @@ NODE_LABEL_ALIASES = (
         ("loraloader", "load lora", "lora loader", "lora"),
     ),
     (
+        ("保存图片", "保存图像", "save image", "saveimage"),
+        ("saveimage", "save image"),
+    ),
+    (
         ("采样器", "采样节点", "调度器", "sampler", "scheduler"),
         ("ksampler", "sampler"),
     ),
@@ -556,6 +560,18 @@ WIDGET_ALIASES = (
     (("negative", "负面", "反向"), ("negative", "negative_prompt", "neg_prompt", "text")),
     (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
     (("prompt", "提示词", "文本", "内容", "text"), ("text", "prompt", "prompt_text", "positive")),
+    (
+        (
+            "filename prefix",
+            "file name prefix",
+            "文件名前缀",
+            "输出文件名前缀",
+            "保存文件名前缀",
+            "保存前缀",
+            "输出前缀",
+        ),
+        ("filename_prefix", "filename", "file_prefix", "output_prefix"),
+    ),
     (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
     (("clip skip", "clip layer", "clip 层", "clip跳层"), ("stop_at_clip_layer",)),
     (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),

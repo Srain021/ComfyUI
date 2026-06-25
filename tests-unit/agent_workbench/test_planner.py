@@ -1174,6 +1174,108 @@ def test_rule_planner_sets_guidance_scale_widget_by_guidance_alias():
     ]
 
 
+def test_rule_planner_sets_save_image_filename_prefix_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 Save Image 的文件名前缀改成 agent_test",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 30,
+                        "type": "SaveImage",
+                        "title": "Save Image",
+                        "widgets": [
+                            {"name": "quality", "value": 95},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                        ],
+                    },
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 30, "widget": "filename_prefix", "value": "agent_test"},
+        }
+    ]
+
+
+def test_rule_planner_selects_save_image_node_by_chinese_alias_for_filename_prefix():
+    plan = RuleBasedPlanner().plan(
+        "把保存图片节点的文件名前缀改成 agent_test",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 30,
+                        "type": "SaveImage",
+                        "title": "Save Image",
+                        "widgets": [
+                            {"name": "quality", "value": 95},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                        ],
+                    },
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 30, "widget": "filename_prefix", "value": "agent_test"},
+        }
+    ]
+
+
+def test_rule_planner_sets_video_combine_output_filename_prefix_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 Video Combine 的输出文件名前缀改成 clip_001",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 42, "widget": "filename_prefix", "value": "clip_001"},
+        }
+    ]
+
+
 def test_rule_planner_sets_sampler_name_by_chinese_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把采样器改成 euler",
