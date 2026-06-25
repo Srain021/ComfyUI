@@ -6,6 +6,7 @@ from pathlib import Path
 from .executor import DefaultExecutor
 from .ops.compose import DEFAULT_COMPOSE_PATH, apply_reserve_vram
 from .ops.manager import manager_request_for_action
+from .ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
 from .permissions import max_risk, requires_confirmation
 
 
@@ -118,6 +119,12 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
         return {"type": action_type, "browser_required": True, "payload": payload}
     if action_type == "context.collect":
         return {"type": action_type, "applied": False, "reason": "context action is read-only"}
+    if action_type == "workflow.save":
+        path = str(_required_payload(payload, "path", action_type))
+        workflow = _required_payload(payload, "workflow", action_type)
+        target = resolve_workflow_path(root, path)
+        result = save_workflow_with_snapshot(target, workflow, _agent_backup_dir(root))
+        return {"type": action_type, "workflow": result}
     if action_type == "compose.set_reserve_vram":
         value = str(_required_payload(payload, "value", action_type))
         compose_path = root / DEFAULT_COMPOSE_PATH
