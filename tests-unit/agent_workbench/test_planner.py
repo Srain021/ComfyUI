@@ -1052,6 +1052,50 @@ def test_rule_planner_horizontally_aligns_all_matching_nodes():
     ]
 
 
+def test_rule_planner_distributes_selected_nodes_horizontally():
+    plan = RuleBasedPlanner().plan(
+        "把选中的节点横向等间距排列",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "selected": True, "pos": [10, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "selected": True, "pos": [70, 40]},
+                    {"id": 11, "type": "VAEDecode", "title": "Decode", "selected": True, "pos": [250, 80]},
+                    {"id": 12, "type": "VAELoader", "title": "VAE", "selected": False, "pos": [400, 100]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 7, "pos": [10, 0]}},
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [130, 40]}},
+        {"type": "graph.set_position", "payload": {"node_id": 11, "pos": [250, 80]}},
+    ]
+
+
+def test_rule_planner_distributes_all_matching_nodes_vertically():
+    plan = RuleBasedPlanner().plan(
+        "把所有 KSampler 节点纵向等间距排列",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "pos": [0, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "pos": [10, 20]},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler", "pos": [50, 50]},
+                    {"id": 11, "type": "KSampler", "title": "Final KSampler", "pos": [90, 200]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [10, 20]}},
+        {"type": "graph.set_position", "payload": {"node_id": 10, "pos": [50, 110]}},
+        {"type": "graph.set_position", "payload": {"node_id": 11, "pos": [90, 200]}},
+    ]
+
+
 def test_rule_planner_selects_node_by_title():
     plan = RuleBasedPlanner().plan(
         "选中 KSampler 节点",

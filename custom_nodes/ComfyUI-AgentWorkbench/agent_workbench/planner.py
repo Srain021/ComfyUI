@@ -723,6 +723,11 @@ def _number_value(value: str) -> int | float:
     return int(number) if number.is_integer() else number
 
 
+def _position_number(value: int | float) -> int | float:
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
 def _node_position(node: dict) -> list[int | float]:
     pos = node.get("pos")
     if not isinstance(pos, list) or len(pos) < 2:
@@ -823,6 +828,50 @@ def _plan_graph_align_nodes(text: str, context: dict) -> dict | None:
                 },
             }
             for node, pos in zip(nodes, positions)
+        ],
+    }
+
+
+def _distribution_axis(text: str) -> str | None:
+    lowered = text.lower()
+    if not any(
+        term in lowered or term in text
+        for term in ("等间距", "均匀", "分布", "排列", "distribute", "space evenly", "spacing")
+    ):
+        return None
+    if any(term in lowered or term in text for term in ("纵向", "垂直", "vertical", "column")):
+        return "vertical"
+    if any(term in lowered or term in text for term in ("横向", "水平", "horizontal", "row")):
+        return "horizontal"
+    return None
+
+
+def _plan_graph_distribute_nodes(text: str, context: dict) -> dict | None:
+    axis = _distribution_axis(text)
+    if axis is None:
+        return None
+    nodes = _select_bulk_nodes(_graph_nodes(context), text)
+    if len(nodes) < 3:
+        return None
+    axis_index = 0 if axis == "horizontal" else 1
+    rows = sorted(((node, _node_position(node)) for node in nodes), key=lambda item: item[1][axis_index])
+    first = rows[0][1][axis_index]
+    last = rows[-1][1][axis_index]
+    step = (last - first) / (len(rows) - 1)
+    return {
+        "summary": f"Distribute {len(rows)} graph node(s)",
+        "actions": [
+            {
+                "type": "graph.set_position",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "pos": [
+                        _position_number(first + step * index) if axis_index == 0 else pos[0],
+                        _position_number(first + step * index) if axis_index == 1 else pos[1],
+                    ],
+                },
+            }
+            for index, (node, pos) in enumerate(rows)
         ],
     }
 
@@ -1375,6 +1424,9 @@ class RuleBasedPlanner:
         graph_align_plan = _plan_graph_align_nodes(text, context)
         if graph_align_plan is not None:
             return graph_align_plan
+        graph_distribute_plan = _plan_graph_distribute_nodes(text, context)
+        if graph_distribute_plan is not None:
+            return graph_distribute_plan
         graph_position_plan = _plan_graph_set_position(text, context)
         if graph_position_plan is not None:
             return graph_position_plan
