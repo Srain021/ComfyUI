@@ -1012,6 +1012,46 @@ def test_rule_planner_moves_all_matching_nodes_by_delta():
     ]
 
 
+def test_rule_planner_left_aligns_selected_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把选中的节点左对齐",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "selected": True, "pos": [120, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "selected": True, "pos": [80, 40]},
+                    {"id": 10, "type": "VAELoader", "title": "VAE", "selected": False, "pos": [10, 20]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 7, "pos": [80, 0]}},
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [80, 40]}},
+    ]
+
+
+def test_rule_planner_horizontally_aligns_all_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把所有 KSampler 节点横向对齐",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "pos": [0, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "pos": [10, 20]},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler", "pos": [50, 60]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [10, 20]}},
+        {"type": "graph.set_position", "payload": {"node_id": 10, "pos": [50, 20]}},
+    ]
+
+
 def test_rule_planner_selects_node_by_title():
     plan = RuleBasedPlanner().plan(
         "选中 KSampler 节点",

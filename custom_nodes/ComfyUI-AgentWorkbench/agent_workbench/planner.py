@@ -766,6 +766,67 @@ def _extract_move_delta(text: str) -> list[int | float] | None:
     return [direction[0] * distance, direction[1] * distance]
 
 
+def _alignment_axis(text: str) -> str | None:
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("左对齐", "align left", "left align")):
+        return "left"
+    if any(term in lowered or term in text for term in ("右对齐", "align right", "right align")):
+        return "right"
+    if any(term in lowered or term in text for term in ("上对齐", "顶端对齐", "align top", "top align")):
+        return "top"
+    if any(term in lowered or term in text for term in ("下对齐", "底部对齐", "align bottom", "bottom align")):
+        return "bottom"
+    if any(term in lowered or term in text for term in ("横向对齐", "水平对齐", "align horizontal")):
+        return "horizontal"
+    if any(term in lowered or term in text for term in ("纵向对齐", "垂直对齐", "align vertical")):
+        return "vertical"
+    return None
+
+
+def _alignment_reference(axis: str, positions: list[list[int | float]]) -> int | float:
+    if axis == "left":
+        return min(pos[0] for pos in positions)
+    if axis == "right":
+        return max(pos[0] for pos in positions)
+    if axis == "top":
+        return min(pos[1] for pos in positions)
+    if axis == "bottom":
+        return max(pos[1] for pos in positions)
+    if axis == "vertical":
+        return positions[0][0]
+    return positions[0][1]
+
+
+def _aligned_position(axis: str, pos: list[int | float], reference: int | float) -> list[int | float]:
+    if axis in {"left", "right", "vertical"}:
+        return [reference, pos[1]]
+    return [pos[0], reference]
+
+
+def _plan_graph_align_nodes(text: str, context: dict) -> dict | None:
+    axis = _alignment_axis(text)
+    if axis is None:
+        return None
+    nodes = _select_bulk_nodes(_graph_nodes(context), text)
+    if len(nodes) < 2:
+        return None
+    positions = [_node_position(node) for node in nodes]
+    reference = _alignment_reference(axis, positions)
+    return {
+        "summary": f"Align {len(nodes)} graph node(s)",
+        "actions": [
+            {
+                "type": "graph.set_position",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "pos": _aligned_position(axis, pos, reference),
+                },
+            }
+            for node, pos in zip(nodes, positions)
+        ],
+    }
+
+
 def _plan_graph_set_position(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("移动", "移到", "挪", "move")):
@@ -1311,6 +1372,9 @@ class RuleBasedPlanner:
         graph_title_plan = _plan_graph_set_title(text, context)
         if graph_title_plan is not None:
             return graph_title_plan
+        graph_align_plan = _plan_graph_align_nodes(text, context)
+        if graph_align_plan is not None:
+            return graph_align_plan
         graph_position_plan = _plan_graph_set_position(text, context)
         if graph_position_plan is not None:
             return graph_position_plan
