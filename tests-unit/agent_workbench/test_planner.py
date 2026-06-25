@@ -519,6 +519,68 @@ def test_rule_planner_sets_multiple_widgets_on_same_node():
     ]
 
 
+def test_rule_planner_randomizes_seed_control_on_selected_sampler():
+    plan = RuleBasedPlanner().plan(
+        "把这个 KSampler 的种子随机化",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "selected": True,
+                        "widgets": [
+                            {"name": "seed", "value": 12345},
+                            {"name": "control_after_generate", "value": "fixed"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 9,
+                "widget": "control_after_generate",
+                "value": "randomize",
+            },
+        }
+    ]
+
+
+def test_rule_planner_fixes_seed_value_and_control_on_sampler():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的种子固定为 12345",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "seed", "value": 1},
+                            {"name": "control_after_generate", "value": "randomize"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "seed", "value": 12345}},
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 9, "widget": "control_after_generate", "value": "fixed"},
+        },
+    ]
+
+
 def test_rule_planner_sets_widget_on_all_matching_nodes():
     plan = RuleBasedPlanner().plan(
         "把所有 KSampler 的 steps 改成 30",

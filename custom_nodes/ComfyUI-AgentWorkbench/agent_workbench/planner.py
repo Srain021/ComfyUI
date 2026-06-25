@@ -41,6 +41,8 @@ VALUE_SET_DELIMITERS = (
 TEXT_APPEND_DELIMITERS = ("加上", "追加", "补上", "加入")
 TEXT_REMOVE_DELIMITERS = ("去掉", "去除", "删除", "删掉", "移除")
 TEXT_CLEAR_TERMS = ("清空", "清除", "清掉", "clear", "empty")
+SEED_RANDOM_TERMS = ("随机", "random", "randomize")
+SEED_FIXED_TERMS = ("固定", "锁定", "fixed", "fix")
 
 
 def _extract_value_after_set(text: str) -> str | None:
@@ -438,6 +440,52 @@ def _adjust_widget_value(widget: dict, delta: int | float) -> object | None:
     return value
 
 
+def _mentions_seed(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered or term in text for term in ("seed", "种子"))
+
+
+def _seed_control_actions_for_node(text: str, node: dict) -> list[dict]:
+    if not _mentions_seed(text):
+        return []
+    widgets = _node_widgets(node)
+    control = _find_widget_by_name(widgets, ("control_after_generate",))
+    if control is None:
+        return []
+    lowered = text.lower()
+    randomize = any(term in lowered or term in text for term in SEED_RANDOM_TERMS)
+    fixed = any(term in lowered or term in text for term in SEED_FIXED_TERMS)
+    if not randomize and not fixed:
+        return []
+
+    actions = []
+    if fixed:
+        seed = _find_widget_by_name(widgets, ("seed", "noise_seed"))
+        numbers = re.findall(r"-?\d+", text)
+        if seed is not None and numbers:
+            actions.append(
+                {
+                    "type": "graph.set_widget",
+                    "payload": {
+                        "node_id": node.get("id"),
+                        "widget": seed["name"],
+                        "value": _coerce_widget_value(numbers[-1], seed),
+                    },
+                }
+            )
+    actions.append(
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": node.get("id"),
+                "widget": control["name"],
+                "value": "randomize" if randomize and not fixed else "fixed",
+            },
+        }
+    )
+    return actions
+
+
 def _append_text_value(current: object, fragment: str) -> str | None:
     if not isinstance(current, str):
         return None
@@ -533,6 +581,10 @@ def _looks_like_widget_text_removal(text: str) -> bool:
 
 
 def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
+    seed_control_actions = _seed_control_actions_for_node(text, node)
+    if seed_control_actions:
+        return seed_control_actions
+
     text_actions = _text_edit_actions_for_node(text, node)
     if text_actions:
         return text_actions
