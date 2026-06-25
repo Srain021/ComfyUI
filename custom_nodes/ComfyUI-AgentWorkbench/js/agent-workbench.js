@@ -100,6 +100,54 @@ async function executeFrontendRequest(request) {
   return result;
 }
 
+function commandStore() {
+  const candidates = [
+    app.extensionManager?.commandStore,
+    app.commandStore,
+    globalThis.comfyAPI?.commandStore,
+    globalThis.comfyAPI?.stores?.commandStore,
+  ];
+  return candidates.find((candidate) => typeof candidate?.execute === "function");
+}
+
+async function executeComfyCommand(commandId) {
+  const store = commandStore();
+  if (store) {
+    const result = await store.execute(commandId, {
+      metadata: {
+        subscribe_to_run: false,
+        trigger_source: "agent_workbench",
+      },
+    });
+    return { command: commandId, via: "commandStore", result: result ?? null };
+  }
+  const queueButton = document.querySelector('[data-testid="queue-button"]');
+  if (commandId === "Comfy.QueuePrompt" && queueButton instanceof HTMLElement) {
+    queueButton.click();
+    return { command: commandId, via: "queue-button" };
+  }
+  throw new Error(`Comfy command store unavailable for ${commandId}`);
+}
+
+async function executeBrowserRuntimeAction(action) {
+  if (action.type !== "runtime.queue_prompt") {
+    return null;
+  }
+  const commandId = action.payload?.front === true ? "Comfy.QueuePromptFront" : "Comfy.QueuePrompt";
+  const result = await executeComfyCommand(commandId);
+  return { type: action.type, front: action.payload?.front === true, ...result };
+}
+
+async function executeBrowserRuntimeActions(actions) {
+  const rows = [];
+  for (const action of actions) {
+    if (action.type === "runtime.queue_prompt") {
+      rows.push(await executeBrowserRuntimeAction(action));
+    }
+  }
+  return rows;
+}
+
 function createWorkbenchPanel() {
   if (document.getElementById("agent-workbench-panel")) {
     return;
@@ -184,6 +232,7 @@ function createWorkbenchPanel() {
     if (result.ok) {
       try {
         result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
+        result.browser_runtime = await executeBrowserRuntimeActions(lastDryRun.plan.actions);
       } catch (error) {
         result.ok = false;
         result.browser_error = error instanceof Error ? error.message : String(error);

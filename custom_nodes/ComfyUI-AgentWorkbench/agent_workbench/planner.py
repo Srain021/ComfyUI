@@ -889,6 +889,30 @@ def _plan_compose_up(text: str) -> dict | None:
     }
 
 
+def _plan_runtime_queue_prompt(text: str) -> dict | None:
+    lowered = text.lower()
+    if not any(
+        term in lowered or term in text
+        for term in (
+            "开始生成",
+            "插队生成",
+            "提交当前工作流",
+            "运行当前工作流",
+            "执行当前工作流",
+            "跑当前工作流",
+            "run workflow",
+            "queue prompt",
+            "queue workflow",
+        )
+    ):
+        return None
+    front = any(term in lowered or term in text for term in ("插队", "队首", "front"))
+    return {
+        "summary": "Queue current ComfyUI workflow",
+        "actions": [{"type": "runtime.queue_prompt", "payload": {"front": front}}],
+    }
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -920,6 +944,9 @@ class RuleBasedPlanner:
         graph_plan = _plan_graph_widget_edit(text, context)
         if graph_plan is not None:
             return graph_plan
+        queue_prompt_plan = _plan_runtime_queue_prompt(text)
+        if queue_prompt_plan is not None:
+            return queue_prompt_plan
         if "swapoff" in lowered or (
             "swap" in lowered and any(term in text for term in ("关", "关闭", "禁用"))
         ):

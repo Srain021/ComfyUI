@@ -26,6 +26,7 @@ ACTION_REGISTRY = {
     "graph.set_position": ("graph.edit", "canvas"),
     "graph.select_node": ("graph.edit", "canvas"),
     "workflow.save": ("workflow.write", "file"),
+    "runtime.queue_prompt": ("runtime.queue", "runtime"),
     "runtime.free_memory": ("runtime.free_memory", "runtime"),
     "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),
     "custom_node.install": ("custom_node.manage", "package"),
@@ -123,6 +124,8 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
     action_type = action["type"]
     payload = action.get("payload", {})
     if action_type.startswith("graph."):
+        return {"type": action_type, "browser_required": True, "payload": payload}
+    if action_type == "runtime.queue_prompt":
         return {"type": action_type, "browser_required": True, "payload": payload}
     if action_type == "context.collect":
         return {"type": action_type, "applied": False, "reason": "context action is read-only"}

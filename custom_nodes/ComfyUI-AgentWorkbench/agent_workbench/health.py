@@ -6,6 +6,7 @@ CORE_CAPABILITIES = [
     "graph.inspect",
     "graph.edit",
     "workflow.write",
+    "runtime.queue",
     "runtime.free_memory",
     "custom_node.manage",
     "service.compose",

@@ -133,6 +133,9 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert 'import { applyGraphActions } from "./graph-actions.js";' in script
     assert "if (result.ok)" in script
     assert "result.browser_applied = applyGraphActions(lastDryRun.plan.actions)" in script
+    assert "executeBrowserRuntimeActions(lastDryRun.plan.actions)" in script
+    assert "Comfy.QueuePrompt" in script
+    assert "Comfy.QueuePromptFront" in script
     assert "browser_error" in script
     assert "executeFrontendRequest" in script
     assert "manager_request" in script

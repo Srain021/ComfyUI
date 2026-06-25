@@ -152,6 +152,19 @@ def test_graph_select_node_is_canvas_edit_without_extra_confirmation():
     assert plan["requires_confirmation"] is False
 
 
+def test_queue_prompt_requires_runtime_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Queue current workflow",
+            "actions": [{"type": "runtime.queue_prompt", "payload": {"front": False}}],
+        }
+    )
+
+    assert plan["risk_level"] == "runtime"
+    assert plan["required_capabilities"] == ["runtime.queue"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_stable_plan_hash_ignores_top_level_plan_hash():
     plan = validate_plan(
         {

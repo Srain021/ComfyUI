@@ -161,3 +161,27 @@ def test_runtime_free_memory_returns_frontend_http_request(tmp_path):
         "type": "runtime.free_memory",
         "http_request": {"path": "/free", "json": {}},
     }
+
+
+def test_runtime_queue_prompt_returns_browser_required_action(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Queue current workflow",
+            "actions": [{"type": "runtime.queue_prompt", "payload": {"front": True}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=RecordingExecutor(),
+    )
+
+    assert result["applied"][0] == {
+        "type": "runtime.queue_prompt",
+        "browser_required": True,
+        "payload": {"front": True},
+    }

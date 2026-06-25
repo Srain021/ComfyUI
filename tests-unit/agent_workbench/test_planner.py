@@ -743,6 +743,18 @@ def test_rule_planner_plans_stop_ollama_model():
     ]
 
 
+def test_rule_planner_plans_queue_current_workflow():
+    plan = RuleBasedPlanner().plan("开始生成当前工作流", context={})
+
+    assert plan["actions"] == [{"type": "runtime.queue_prompt", "payload": {"front": False}}]
+
+
+def test_rule_planner_plans_queue_current_workflow_to_front():
+    plan = RuleBasedPlanner().plan("插队生成当前工作流", context={})
+
+    assert plan["actions"] == [{"type": "runtime.queue_prompt", "payload": {"front": True}}]
+
+
 def test_rule_planner_prints_sudo_for_ollama_service_stop():
     plan = RuleBasedPlanner().plan("彻底停止 ollama 服务", context={})
 
