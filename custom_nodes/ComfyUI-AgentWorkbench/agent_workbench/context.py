@@ -2,10 +2,22 @@ from pathlib import Path
 
 
 def _empty_graph_summary() -> dict:
-    return {"node_count": 0, "link_count": 0, "selected_node_ids": []}
+    return {
+        "node_count": 0,
+        "node_count_truncated": False,
+        "link_count": 0,
+        "links_truncated": False,
+        "selected_node_ids": [],
+        "selected_node_ids_truncated": False,
+    }
 
 
-def _graph_summary(graph: dict | None) -> dict:
+def _graph_summary(
+    graph: dict | None,
+    max_graph_nodes: int,
+    max_selected_node_ids: int,
+    max_graph_links: int,
+) -> dict:
     if not isinstance(graph, dict):
         return _empty_graph_summary()
     nodes = graph.get("nodes")
@@ -14,12 +26,30 @@ def _graph_summary(graph: dict | None) -> dict:
         nodes = []
     if not isinstance(links, list):
         links = []
-    node_rows = [node for node in nodes if isinstance(node, dict)]
-    selected = [node.get("id") for node in node_rows if node.get("selected")]
+
+    nodes_truncated = len(nodes) > max_graph_nodes
+    inspected_nodes = nodes[:max_graph_nodes]
+    node_rows = []
+    selected = []
+    selected_truncated = nodes_truncated
+    for node in inspected_nodes:
+        if not isinstance(node, dict):
+            continue
+        node_rows.append(node)
+        if node.get("selected"):
+            if len(selected) < max_selected_node_ids:
+                selected.append(node.get("id"))
+            else:
+                selected_truncated = True
+
+    links_truncated = len(links) > max_graph_links
     return {
         "node_count": len(node_rows),
-        "link_count": len(links),
+        "node_count_truncated": nodes_truncated,
+        "link_count": min(len(links), max_graph_links),
+        "links_truncated": links_truncated,
         "selected_node_ids": selected,
+        "selected_node_ids_truncated": selected_truncated,
     }
 
 
@@ -208,11 +238,17 @@ def _workflow_rows(
 def collect_context(
     root: Path,
     graph: dict | None = None,
+    max_graph_nodes: int = 500,
+    max_selected_node_ids: int = 100,
+    max_graph_links: int = 1000,
     max_workflows: int = 50,
     max_workflow_scan_entries: int | None = None,
     max_custom_nodes: int = 100,
     max_custom_node_scan_entries: int | None = None,
 ) -> dict:
+    max_graph_nodes = max(0, max_graph_nodes)
+    max_selected_node_ids = max(0, max_selected_node_ids)
+    max_graph_links = max(0, max_graph_links)
     max_workflows = max(0, max_workflows)
     if max_workflow_scan_entries is None:
         max_workflow_scan_entries = max(500, max_workflows * 10)
@@ -233,7 +269,12 @@ def collect_context(
     )
     return {
         "root": str(root),
-        "graph": _graph_summary(graph),
+        "graph": _graph_summary(
+            graph,
+            max_graph_nodes=max_graph_nodes,
+            max_selected_node_ids=max_selected_node_ids,
+            max_graph_links=max_graph_links,
+        ),
         "custom_nodes": custom_nodes,
         "custom_nodes_truncated": custom_nodes_truncated,
         "workflows": workflows,

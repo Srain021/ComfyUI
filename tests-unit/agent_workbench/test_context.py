@@ -97,8 +97,11 @@ def test_collect_context_tolerates_malformed_graph_shapes(tmp_path):
 
     assert empty_context["graph"] == {
         "node_count": 0,
+        "node_count_truncated": False,
         "link_count": 0,
+        "links_truncated": False,
         "selected_node_ids": [],
+        "selected_node_ids_truncated": False,
     }
 
     mixed_context = collect_context(
@@ -115,8 +118,38 @@ def test_collect_context_tolerates_malformed_graph_shapes(tmp_path):
 
     assert mixed_context["graph"] == {
         "node_count": 2,
+        "node_count_truncated": False,
         "link_count": 0,
+        "links_truncated": False,
         "selected_node_ids": [1],
+        "selected_node_ids_truncated": False,
+    }
+
+
+def test_collect_context_bounds_graph_metadata(tmp_path):
+    graph = {
+        "nodes": [
+            {"id": index, "selected": True}
+            for index in range(8)
+        ],
+        "links": list(range(6)),
+    }
+
+    context = collect_context(
+        tmp_path,
+        graph=graph,
+        max_graph_nodes=4,
+        max_selected_node_ids=2,
+        max_graph_links=3,
+    )
+
+    assert context["graph"] == {
+        "node_count": 4,
+        "node_count_truncated": True,
+        "link_count": 3,
+        "links_truncated": True,
+        "selected_node_ids": [0, 1],
+        "selected_node_ids_truncated": True,
     }
 
 
@@ -208,8 +241,11 @@ def test_register_routes_adds_agent_context_post_route():
         malformed_payload = json.loads(malformed_response.text)
         assert malformed_payload["graph"] == {
             "node_count": 0,
+            "node_count_truncated": False,
             "link_count": 0,
+            "links_truncated": False,
             "selected_node_ids": [],
+            "selected_node_ids_truncated": False,
         }
     finally:
         agent_routes._REGISTERED = False
