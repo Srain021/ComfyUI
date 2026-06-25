@@ -341,3 +341,52 @@ def test_register_routes_adds_agent_plan_route():
         assert payload["plan"]["requires_confirmation"] is True
     finally:
         agent_routes._REGISTERED = False
+
+
+def test_agent_plan_route_passes_graph_snapshot_to_planner():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/plan")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "把这个 prompt 节点的文本改成 cinematic lighting",
+                        "graph": {
+                            "nodes": [
+                                {
+                                    "id": 12,
+                                    "type": "CLIPTextEncode",
+                                    "title": "Prompt",
+                                    "selected": True,
+                                    "widgets": [{"name": "text", "value": "old"}],
+                                }
+                            ],
+                            "links": [],
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"][0]["type"] == "graph.set_widget"
+        assert payload["plan"]["actions"][0]["payload"] == {
+            "node_id": 12,
+            "widget": "text",
+            "value": "cinematic lighting",
+        }
+        assert payload["plan"]["requires_confirmation"] is False
+    finally:
+        agent_routes._REGISTERED = False

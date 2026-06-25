@@ -9,6 +9,23 @@ from .planner import default_planner
 
 
 _REGISTERED = False
+MAX_PLANNER_GRAPH_NODES = 500
+MAX_PLANNER_GRAPH_LINKS = 1000
+
+
+def _bounded_graph_input(graph: object) -> dict:
+    if not isinstance(graph, dict):
+        return {}
+    nodes = graph.get("nodes")
+    links = graph.get("links")
+    if not isinstance(nodes, list):
+        nodes = []
+    if not isinstance(links, list):
+        links = []
+    return {
+        "nodes": [node for node in nodes[:MAX_PLANNER_GRAPH_NODES] if isinstance(node, dict)],
+        "links": [link for link in links[:MAX_PLANNER_GRAPH_LINKS] if isinstance(link, dict)],
+    }
 
 
 async def _json_request(request) -> dict:
@@ -52,6 +69,7 @@ def register_routes(prompt_server=None) -> None:
         message = body.get("message", "")
         graph = body.get("graph")
         context = collect_context(Path.cwd(), graph=graph)
+        context["graph_input"] = _bounded_graph_input(graph)
         raw_plan = default_planner().plan(message, context=context)
         try:
             return web.json_response(dry_run_plan(raw_plan))

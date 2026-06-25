@@ -2,10 +2,308 @@ import os
 import re
 
 
+MAX_PLANNER_GRAPH_NODES = 500
+MAX_PLANNER_WIDGETS_PER_NODE = 64
+
+
+def _context_plan(message: str) -> dict:
+    return {
+        "summary": f"Inspect context for: {message}",
+        "actions": [{"type": "context.collect", "payload": {"message": message}}],
+    }
+
+
+def _strip_value(value: str) -> str:
+    cleaned = value.strip()
+    cleaned = cleaned.strip(" \t\r\n'\"`.,，。:：")
+    cleaned = cleaned.strip("“”‘’")
+    return cleaned
+
+
+def _extract_value_after_set(text: str) -> str | None:
+    for delimiter in ("改成", "改为", "设置为", "设为", "变成"):
+        if delimiter in text:
+            return _strip_value(text.rsplit(delimiter, 1)[1])
+    match = re.search(r"\b(?:set|change|update)\b.+?\b(?:to|as)\b\s*(.+)$", text, re.IGNORECASE)
+    if match:
+        return _strip_value(match.group(1))
+    return None
+
+
+def _graph_nodes(context: dict) -> list[dict]:
+    graph = context.get("graph_input") if isinstance(context, dict) else None
+    if not isinstance(graph, dict):
+        return []
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return []
+    return [node for node in nodes[:MAX_PLANNER_GRAPH_NODES] if isinstance(node, dict)]
+
+
+def _node_widgets(node: dict) -> list[dict]:
+    widgets = node.get("widgets")
+    if not isinstance(widgets, list):
+        return []
+    return [
+        widget
+        for widget in widgets[:MAX_PLANNER_WIDGETS_PER_NODE]
+        if isinstance(widget, dict) and isinstance(widget.get("name"), str)
+    ]
+
+
+def _extract_node_id(text: str) -> str | None:
+    patterns = (
+        r"(\d+)\s*号?\s*节点",
+        r"节点\s*#?\s*(\d+)",
+        r"\bnode\s*#?\s*(\d+)\b",
+        r"#(\d+)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _find_node_by_id(nodes: list[dict], node_id: str | None) -> dict | None:
+    if node_id is None:
+        return None
+    for node in nodes:
+        if str(node.get("id")) == node_id:
+            return node
+    return None
+
+
+def _selected_nodes(nodes: list[dict]) -> list[dict]:
+    return [node for node in nodes if node.get("selected") is True]
+
+
+def _message_mentions_current_node(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in text for term in ("这个", "当前", "选中", "选择")) or any(
+        term in lowered for term in ("this", "selected", "current")
+    )
+
+
+def _node_label(node: dict) -> str:
+    parts = []
+    for key in ("title", "type"):
+        value = node.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    return " ".join(parts).strip()
+
+
+def _find_node_by_label(nodes: list[dict], text: str) -> dict | None:
+    lowered = text.lower()
+    matches = []
+    for node in nodes:
+        label = _node_label(node)
+        if not label:
+            continue
+        label_lower = label.lower()
+        if label_lower and label_lower in lowered:
+            matches.append((len(label_lower), node))
+            continue
+        title = node.get("title")
+        if isinstance(title, str) and title.lower() in lowered:
+            matches.append((len(title), node))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0], reverse=True)
+    return matches[0][1]
+
+
+def _select_node(nodes: list[dict], text: str) -> dict | None:
+    explicit = _find_node_by_id(nodes, _extract_node_id(text))
+    if explicit is not None:
+        return explicit
+
+    selected = _selected_nodes(nodes)
+    if _message_mentions_current_node(text) and len(selected) == 1:
+        return selected[0]
+
+    labelled = _find_node_by_label(nodes, text)
+    if labelled is not None:
+        return labelled
+
+    if len(selected) == 1:
+        return selected[0]
+    if len(nodes) == 1:
+        return nodes[0]
+    return None
+
+
+WIDGET_ALIASES = (
+    (("negative", "负面", "反向"), ("negative", "negative_prompt", "neg_prompt", "text")),
+    (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
+    (("prompt", "提示词", "文本", "text"), ("text", "prompt", "prompt_text", "positive")),
+    (("seed", "种子"), ("seed", "noise_seed")),
+    (("steps", "步数"), ("steps",)),
+    (("cfg",), ("cfg", "cfg_scale")),
+    (("sampler", "采样器"), ("sampler_name", "sampler")),
+    (("scheduler", "调度器"), ("scheduler",)),
+    (("width", "宽度"), ("width",)),
+    (("height", "高度"), ("height",)),
+)
+
+
+def _find_widget_by_name(widgets: list[dict], candidates: tuple[str, ...]) -> dict | None:
+    candidate_set = {candidate.lower() for candidate in candidates}
+    for widget in widgets:
+        name = widget["name"]
+        if name.lower() in candidate_set:
+            return widget
+    return None
+
+
+def _select_widget(node: dict, text: str) -> dict | None:
+    widgets = _node_widgets(node)
+    if not widgets:
+        return None
+    lowered = text.lower()
+
+    for widget in widgets:
+        name = widget["name"]
+        if name.lower() in lowered:
+            return widget
+
+    for triggers, names in WIDGET_ALIASES:
+        if any(trigger in lowered or trigger in text for trigger in triggers):
+            widget = _find_widget_by_name(widgets, names)
+            if widget is not None:
+                return widget
+
+    return _find_widget_by_name(
+        widgets,
+        ("text", "prompt", "positive", "negative", "seed", "steps", "cfg"),
+    ) or widgets[0]
+
+
+def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
+    value = _extract_value_after_set(text)
+    if not value:
+        return None
+    nodes = _graph_nodes(context)
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    widget = _select_widget(node, text)
+    if widget is None:
+        return None
+    return {
+        "summary": f"Set {widget['name']} on node {node.get('id')}",
+        "actions": [
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "widget": widget["name"],
+                    "value": value,
+                },
+            }
+        ],
+    }
+
+
+def _extract_url(text: str) -> str | None:
+    match = re.search(r"https?://[^\s，。]+", text)
+    if match:
+        return match.group(0).rstrip(".,，。")
+    return None
+
+
+def _extract_custom_node_id(text: str) -> str | None:
+    match = re.search(
+        r"(?:custom\s+node|自定义节点|节点)\s+([A-Za-z0-9_.:/-]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).rstrip(".,，。")
+    return None
+
+
+def _extract_ollama_model(text: str) -> str | None:
+    match = re.search(r"(?:模型|model)\s+([A-Za-z0-9_.:/-]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).rstrip(".,，。")
+    match = re.search(r"ollama\s+(?:stop\s+)?([A-Za-z0-9_.:/-]+)", text, re.IGNORECASE)
+    if match and match.group(1).lower() not in {"模型", "model"}:
+        return match.group(1).rstrip(".,，。")
+    return None
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
         lowered = text.lower()
+        graph_plan = _plan_graph_widget_edit(text, context)
+        if graph_plan is not None:
+            return graph_plan
+        if "swapoff" in lowered or (
+            "swap" in lowered and any(term in text for term in ("关", "关闭", "禁用"))
+        ):
+            return {
+                "summary": "Print sudo swapoff command for Srain",
+                "actions": [
+                    {
+                        "type": "sudo.print_command",
+                        "payload": {
+                            "command": "sudo swapoff -a",
+                            "why": "Disable swap to avoid unified-memory paging and machine stalls",
+                        },
+                    }
+                ],
+            }
+        if ("重启" in text or "restart" in lowered) and any(
+            term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
+        ):
+            return {
+                "summary": "Restart ComfyUI container",
+                "actions": [
+                    {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}}
+                ],
+            }
+        if "ollama" in lowered and any(term in lowered or term in text for term in ("stop", "停止", "驱逐")):
+            model = _extract_ollama_model(text)
+            if model:
+                return {
+                    "summary": f"Stop Ollama model {model}",
+                    "actions": [{"type": "runtime.stop_ollama_model", "payload": {"model": model}}],
+                }
+        if ("custom node" in lowered or "自定义节点" in text) and any(
+            term in lowered or term in text for term in ("install", "安装")
+        ):
+            url = _extract_url(text)
+            if url:
+                return {
+                    "summary": f"Install custom node from {url}",
+                    "actions": [
+                        {
+                            "type": "custom_node.install",
+                            "payload": {"method": "git_url", "url": url},
+                        }
+                    ],
+                }
+        if ("custom node" in lowered or "自定义节点" in text or "节点" in text) and any(
+            term in lowered or term in text for term in ("disable", "禁用")
+        ):
+            node_id = _extract_custom_node_id(text)
+            if node_id:
+                return {
+                    "summary": f"Disable custom node {node_id}",
+                    "actions": [{"type": "custom_node.disable", "payload": {"id": node_id}}],
+                }
+        if ("custom node" in lowered or "自定义节点" in text or "节点" in text) and any(
+            term in lowered or term in text for term in ("enable", "启用")
+        ):
+            node_id = _extract_custom_node_id(text)
+            if node_id:
+                return {
+                    "summary": f"Enable custom node {node_id}",
+                    "actions": [{"type": "custom_node.enable", "payload": {"id": node_id}}],
+                }
         if "reserve-vram" in lowered or "reserve vram" in lowered:
             match = re.search(r"(\d+)", text)
             value = match.group(1) if match else "8"
@@ -23,10 +321,7 @@ class RuleBasedPlanner:
                     }
                 ],
             }
-        return {
-            "summary": f"Inspect context for: {text}",
-            "actions": [{"type": "context.collect", "payload": {"message": text}}],
-        }
+        return _context_plan(text)
 
 
 def default_planner() -> RuleBasedPlanner:
