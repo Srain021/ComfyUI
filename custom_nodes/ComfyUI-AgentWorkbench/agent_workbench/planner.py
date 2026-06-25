@@ -182,6 +182,10 @@ NODE_LABEL_ALIASES = (
         ("loraloader", "load lora", "lora loader", "lora"),
     ),
     (
+        ("采样器", "采样节点", "调度器", "sampler", "scheduler"),
+        ("ksampler", "sampler"),
+    ),
+    (
         ("clip skip", "clip layer", "clip 层", "clip跳层"),
         ("clipsetlastlayer", "clip set last layer"),
     ),

@@ -762,6 +762,68 @@ def test_rule_planner_sets_selected_sampler_cfg_with_set_to_synonym():
     ]
 
 
+def test_rule_planner_sets_sampler_name_by_chinese_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把采样器改成 euler",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "sampler_name", "value": "dpmpp_2m"},
+                            {"name": "scheduler", "value": "karras"},
+                        ],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "sampler_name", "value": "euler"}}
+    ]
+
+
+def test_rule_planner_sets_scheduler_by_chinese_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把调度器设成 normal",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "sampler_name", "value": "dpmpp_2m"},
+                            {"name": "scheduler", "value": "karras"},
+                        ],
+                    },
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "scheduler", "value": "normal"}}
+    ]
+
+
 def test_rule_planner_increases_numeric_widget_from_current_value():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 提高 4",
