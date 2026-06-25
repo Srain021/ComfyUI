@@ -49,6 +49,7 @@ ACTION_REGISTRY = {
     "service.stop_container": ("service.restart", "service"),
     "service.start_container": ("service.restart", "service"),
     "service.prerender_free_memory": ("service.restart", "service"),
+    "service.healthcheck": ("context.read", "read"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
 
@@ -159,6 +160,16 @@ def _required_payload(payload: dict, key: str, action_type: str) -> object:
     return payload[key]
 
 
+def _run_healthcheck(executor) -> list[dict]:
+    commands = [
+        ["docker", "ps", "-a", "--filter", "name=comfyui-gb10"],
+        ["docker", "logs", "--tail", "80", "comfyui-gb10"],
+        ["curl", "-sS", "--fail", "http://127.0.0.1:8188/system_stats"],
+        ["free", "-h"],
+    ]
+    return [executor.run_command(command) for command in commands]
+
+
 def _dispatch_action(action: dict, root: Path, executor) -> dict:
     action_type = action["type"]
     payload = action.get("payload", {})
@@ -168,6 +179,8 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
         return {"type": action_type, "browser_required": True, "payload": payload}
     if action_type == "context.collect":
         return {"type": action_type, "applied": False, "reason": "context action is read-only"}
+    if action_type == "service.healthcheck":
+        return {"type": action_type, "commands": _run_healthcheck(executor)}
     if action_type == "workflow.save":
         path = str(_required_payload(payload, "path", action_type))
         workflow = _required_payload(payload, "workflow", action_type)

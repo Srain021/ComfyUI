@@ -35,6 +35,20 @@ def test_validate_compose_text_reads_service():
     assert "comfyui-gb10" in data["services"]
 
 
+def test_runtime_compose_exposes_agent_ops_docker_channel():
+    compose_path = REPO_ROOT / "dgx_spark_ltx_setup" / "docker-compose.yml"
+    data = validate_compose_text(compose_path.read_text(encoding="utf-8"))
+    service = data["services"]["comfyui-gb10"]
+
+    volumes = service["volumes"]
+    assert "/var/run/docker.sock:/var/run/docker.sock" in volumes
+    assert "/usr/bin/docker:/usr/local/bin/docker:ro" in volumes
+    assert (
+        "/usr/libexec/docker/cli-plugins:/usr/local/lib/docker/cli-plugins:ro"
+        in volumes
+    )
+
+
 def test_patch_reserve_vram_preserves_comment_line_shape():
     patched = patch_reserve_vram(COMPOSE_TEXT, "10")
 

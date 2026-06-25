@@ -21,7 +21,13 @@ def _reject_shell_syntax(args: list[str]) -> None:
 def _validate_docker(args: list[str]) -> None:
     if len(args) >= 2 and args[1] == "ps":
         return
-    if args == ["docker", "restart", "comfyui-gb10"]:
+    if args == ["docker", "logs", "--tail", "80", "comfyui-gb10"]:
+        return
+    if args in (
+        ["docker", "restart", "comfyui-gb10"],
+        ["docker", "stop", "comfyui-gb10"],
+        ["docker", "start", "comfyui-gb10"],
+    ):
         return
     compose_prefix = ["docker", "compose", "-f", "dgx_spark_ltx_setup/docker-compose.yml"]
     if args[:4] == compose_prefix and args[4:] in (

@@ -107,6 +107,19 @@ def test_prerender_free_memory_action_requires_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_service_healthcheck_is_read_only_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Check ComfyUI health",
+            "actions": [{"type": "service.healthcheck", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "read"
+    assert plan["required_capabilities"] == ["context.read"]
+    assert plan["requires_confirmation"] is False
+
+
 def test_graph_delete_node_is_canvas_edit_without_extra_confirmation():
     plan = validate_plan(
         {

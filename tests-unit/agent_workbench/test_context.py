@@ -362,6 +362,45 @@ def test_register_routes_adds_apply_deferred_route(monkeypatch):
         agent_routes._REGISTERED = False
 
 
+def test_apply_route_runs_blocking_dispatch_outside_event_loop(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    def fake_apply_plan(plan, approved_hash, root):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return {"ok": True, "threaded": True}
+        return {"ok": False, "threaded": False}
+
+    monkeypatch.setattr(agent_routes, "apply_plan", fake_apply_plan)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/apply")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "plan": {"summary": "health", "actions": []},
+                        "approved_hash": "hash",
+                    }
+                )
+            )
+        )
+
+        assert json.loads(response.text) == {"ok": True, "threaded": True}
+    finally:
+        agent_routes._REGISTERED = False
+
+
 def test_register_routes_adds_agent_plan_route():
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())

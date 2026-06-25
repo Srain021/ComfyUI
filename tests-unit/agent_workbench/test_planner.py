@@ -23,6 +23,13 @@ def test_rule_planner_prerender_free_memory_uses_ops_script():
     assert plan["summary"] == "Run prerender free-memory preparation"
 
 
+def test_rule_planner_plans_service_healthcheck():
+    plan = RuleBasedPlanner().plan("检查 ComfyUI 容器健康和内存", context={})
+
+    assert plan["actions"] == [{"type": "service.healthcheck", "payload": {}}]
+    assert plan["summary"] == "Check ComfyUI container health"
+
+
 def test_rule_planner_reserve_vram():
     plan = RuleBasedPlanner().plan("把 compose reserve-vram 改到 10", context={})
 

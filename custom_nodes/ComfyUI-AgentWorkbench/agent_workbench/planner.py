@@ -1782,6 +1782,24 @@ def _plan_prerender_free_memory(text: str) -> dict | None:
     }
 
 
+def _plan_service_healthcheck(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_service = any(
+        term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
+    )
+    mentions_health = any(
+        term in lowered or term in text
+        for term in ("健康", "状态", "检查", "health", "status", "8188")
+    )
+    mentions_memory = any(term in lowered or term in text for term in ("内存", "memory", "available"))
+    if mentions_service and (mentions_health or mentions_memory):
+        return {
+            "summary": "Check ComfyUI container health",
+            "actions": [{"type": "service.healthcheck", "payload": {}}],
+        }
+    return None
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -1940,6 +1958,9 @@ class RuleBasedPlanner:
         prerender_free_memory_plan = _plan_prerender_free_memory(text)
         if prerender_free_memory_plan is not None:
             return prerender_free_memory_plan
+        service_healthcheck_plan = _plan_service_healthcheck(text)
+        if service_healthcheck_plan is not None:
+            return service_healthcheck_plan
         if "free" in lowered or "释放" in text or "腾内存" in text or "内存" in text:
             return {
                 "summary": "Free ComfyUI memory",

@@ -35,7 +35,24 @@ def test_rejects_unsupported_or_destructive_docker_commands():
 
 def test_allows_known_non_sudo_commands():
     assert validate_command(["docker", "ps", "-a"]) == ["docker", "ps", "-a"]
+    assert validate_command(["docker", "logs", "--tail", "80", "comfyui-gb10"]) == [
+        "docker",
+        "logs",
+        "--tail",
+        "80",
+        "comfyui-gb10",
+    ]
     assert validate_command(docker_restart_command()) == ["docker", "restart", "comfyui-gb10"]
+    assert validate_command(["docker", "stop", "comfyui-gb10"]) == [
+        "docker",
+        "stop",
+        "comfyui-gb10",
+    ]
+    assert validate_command(["docker", "start", "comfyui-gb10"]) == [
+        "docker",
+        "start",
+        "comfyui-gb10",
+    ]
     assert validate_command(
         ["docker", "compose", "-f", "dgx_spark_ltx_setup/docker-compose.yml", "up", "-d"]
     ) == ["docker", "compose", "-f", "dgx_spark_ltx_setup/docker-compose.yml", "up", "-d"]

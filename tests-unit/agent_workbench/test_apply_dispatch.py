@@ -180,6 +180,32 @@ def test_apply_dispatches_confirmed_prerender_free_memory_script(tmp_path):
     assert executor.commands[-1] == ["bash", "dgx_spark_ltx_setup/prerender_free_memory.sh"]
 
 
+def test_apply_dispatches_service_healthcheck_without_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Check ComfyUI health",
+            "actions": [{"type": "service.healthcheck", "payload": {}}],
+        }
+    )
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        dry_run["plan"],
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "service.healthcheck"
+    assert executor.commands == [
+        ["docker", "ps", "-a", "--filter", "name=comfyui-gb10"],
+        ["docker", "logs", "--tail", "80", "comfyui-gb10"],
+        ["curl", "-sS", "--fail", "http://127.0.0.1:8188/system_stats"],
+        ["free", "-h"],
+    ]
+
+
 def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_path):
     dry_run = dry_run_plan(
         {
