@@ -180,6 +180,29 @@ def test_apply_dispatches_confirmed_prerender_free_memory_script(tmp_path):
     assert executor.commands[-1] == ["bash", "dgx_spark_ltx_setup/prerender_free_memory.sh"]
 
 
+def test_apply_dispatches_confirmed_restore_original_script(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Restore original ComfyUI container config",
+            "actions": [{"type": "service.restore_original", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "service.restore_original"
+    assert executor.commands[-1] == ["bash", "dgx_spark_ltx_setup/restore_original.sh"]
+
+
 def test_apply_dispatches_service_healthcheck_without_confirmation(tmp_path):
     dry_run = dry_run_plan(
         {

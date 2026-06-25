@@ -77,6 +77,17 @@ def test_allows_only_fixed_prerender_free_memory_script():
         validate_command(["bash", "-lc", "dgx_spark_ltx_setup/prerender_free_memory.sh"])
 
 
+def test_allows_only_fixed_restore_original_script():
+    assert validate_command(["bash", "dgx_spark_ltx_setup/restore_original.sh"]) == [
+        "bash",
+        "dgx_spark_ltx_setup/restore_original.sh",
+    ]
+    with pytest.raises(CommandRejected):
+        validate_command(["bash", "dgx_spark_ltx_setup/restore_original.sh; docker ps"])
+    with pytest.raises(CommandRejected):
+        validate_command(["bash", "-lc", "dgx_spark_ltx_setup/restore_original.sh"])
+
+
 def test_curl_is_limited_to_local_comfyui_urls():
     assert validate_command(["curl", "-sS", "--fail", "http://127.0.0.1:8188/free"])
     with pytest.raises(CommandRejected):

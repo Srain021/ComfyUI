@@ -2814,6 +2814,13 @@ def test_rule_planner_plans_start_container():
     ]
 
 
+def test_rule_planner_plans_restore_original_container_config():
+    plan = RuleBasedPlanner().plan("回滚到原始 ComfyUI 容器配置", context={})
+
+    assert plan["summary"] == "Restore original ComfyUI container configuration"
+    assert plan["actions"] == [{"type": "service.restore_original", "payload": {}}]
+
+
 def test_rule_planner_plans_stop_ollama_model():
     plan = RuleBasedPlanner().plan("停止 ollama 模型 nemotron-3-nano:30b", context={})
 

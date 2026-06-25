@@ -2110,6 +2110,24 @@ def _plan_container_lifecycle(text: str) -> dict | None:
     return None
 
 
+def _plan_restore_original_container(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_restore = any(
+        term in lowered or term in text
+        for term in ("回滚", "恢复原始", "恢复原来的", "restore original", "rollback", "prevcfg")
+    )
+    mentions_container_config = any(
+        term in lowered or term in text
+        for term in ("comfyui", "容器", "container", "配置", "config", "prevcfg")
+    )
+    if not (mentions_restore and mentions_container_config):
+        return None
+    return {
+        "summary": "Restore original ComfyUI container configuration",
+        "actions": [{"type": "service.restore_original", "payload": {}}],
+    }
+
+
 def _plan_custom_node_install_from_url(text: str) -> dict | None:
     lowered = text.lower()
     if not (_mentions_custom_node(text) and any(term in lowered or term in text for term in ("install", "安装"))):
@@ -2489,6 +2507,9 @@ class RuleBasedPlanner:
             graph_text = _strip_workflow_save_clause(graph_text)
         if queue_prompt_plan is not None:
             graph_text = _strip_queue_prompt_clause(graph_text)
+        restore_original_plan = _plan_restore_original_container(text)
+        if restore_original_plan is not None:
+            return restore_original_plan
         graph_delete_plan = _plan_graph_delete_node(graph_text, context)
         if graph_delete_plan is not None:
             return _combine_with_followup_plans(graph_delete_plan, followup_plans, graph_text, text)

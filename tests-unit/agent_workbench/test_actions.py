@@ -107,6 +107,19 @@ def test_prerender_free_memory_action_requires_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_restore_original_action_requires_explicit_approval():
+    plan = validate_plan(
+        {
+            "summary": "Restore original ComfyUI container config",
+            "actions": [{"type": "service.restore_original", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.restart"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_prerender_free_memory_then_queue_prompt_uses_service_risk():
     plan = validate_plan(
         {
@@ -359,6 +372,7 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
         ("service.stop_container", {"container": "comfyui-gb10"}, "service"),
         ("service.start_container", {"container": "comfyui-gb10"}, "service"),
         ("service.prerender_free_memory", {}, "service"),
+        ("service.restore_original", {}, "service"),
         ("sudo.print_command", {"command": "sudo swapoff -a"}, "human_sudo"),
     ],
 )

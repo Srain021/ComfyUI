@@ -10,6 +10,7 @@ DENIED_BINARIES = {"sudo", "bash", "sh", "python", "python3"}
 SHELL_TOKENS = {";", "&&", "||", "|", ">", "<", "$(", "`"}
 LOCAL_COMFY_URLS = ("http://127.0.0.1:8188/", "http://localhost:8188/")
 PRERENDER_FREE_MEMORY_COMMAND = ["bash", "dgx_spark_ltx_setup/prerender_free_memory.sh"]
+RESTORE_ORIGINAL_COMMAND = ["bash", "dgx_spark_ltx_setup/restore_original.sh"]
 
 
 def _reject_shell_syntax(args: list[str]) -> None:
@@ -62,7 +63,7 @@ def validate_command(args: list[str]) -> list[str]:
         raise CommandRejected("empty command")
     if not all(isinstance(arg, str) and arg for arg in args):
         raise CommandRejected("command arguments must be non-empty strings")
-    if args == PRERENDER_FREE_MEMORY_COMMAND:
+    if args in (PRERENDER_FREE_MEMORY_COMMAND, RESTORE_ORIGINAL_COMMAND):
         return list(args)
     binary = args[0]
     if binary in DENIED_BINARIES:
