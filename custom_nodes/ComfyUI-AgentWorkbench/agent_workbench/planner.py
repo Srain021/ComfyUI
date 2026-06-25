@@ -191,6 +191,48 @@ def _select_node(nodes: list[dict], text: str) -> dict | None:
     return None
 
 
+def _message_mentions_all_nodes(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered or term in text for term in ("所有", "全部", "all", "every"))
+
+
+def _find_nodes_by_semantic_label(nodes: list[dict], text: str) -> list[dict]:
+    lowered = text.lower()
+    for triggers, label_candidates in NODE_LABEL_ALIASES:
+        if not any(trigger in lowered or trigger in text for trigger in triggers):
+            continue
+        matches = []
+        for node in nodes:
+            label_lower = _node_label(node).lower()
+            if any(candidate in label_lower for candidate in label_candidates):
+                matches.append(node)
+        return matches
+    return []
+
+
+def _find_nodes_by_label(nodes: list[dict], text: str) -> list[dict]:
+    lowered = text.lower()
+    matches = []
+    for node in nodes:
+        for key in ("title", "type"):
+            value = node.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            if value.lower() in lowered:
+                matches.append(node)
+                break
+    return matches
+
+
+def _select_all_matching_nodes(nodes: list[dict], text: str) -> list[dict]:
+    if not _message_mentions_all_nodes(text):
+        return []
+    semantic = _find_nodes_by_semantic_label(nodes, text)
+    if semantic:
+        return semantic
+    return _find_nodes_by_label(nodes, text)
+
+
 WIDGET_ALIASES = (
     (("negative", "负面", "反向"), ("negative", "negative_prompt", "neg_prompt", "text")),
     (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
@@ -336,82 +378,84 @@ def _adjust_widget_value(widget: dict, delta: int | float) -> object | None:
     return value
 
 
-def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
-    nodes = _graph_nodes(context)
-    node = _select_node(nodes, text)
-    if node is None:
-        return None
+def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
     size_assignments = _size_assignments(text, node)
     if size_assignments:
-        return {
-            "summary": f"Set size widgets on node {node.get('id')}",
-            "actions": [
-                {
-                    "type": "graph.set_widget",
-                    "payload": {
-                        "node_id": node.get("id"),
-                        "widget": widget["name"],
-                        "value": value,
-                    },
-                }
-                for widget, value in size_assignments
-            ],
-        }
-    assignments = _widget_assignments(text, node)
+        assignments = size_assignments
+    else:
+        assignments = _widget_assignments(text, node)
     if assignments:
-        return {
-            "summary": f"Set {len(assignments)} widget(s) on node {node.get('id')}",
-            "actions": [
-                {
-                    "type": "graph.set_widget",
-                    "payload": {
-                        "node_id": node.get("id"),
-                        "widget": widget["name"],
-                        "value": value,
-                    },
-                }
-                for widget, value in assignments
-            ],
-        }
-    delta = _extract_widget_delta(text)
-    if delta is not None:
-        widget = _select_widget(node, text)
-        if widget is None:
-            return None
-        value = _adjust_widget_value(widget, delta)
-        if value is None:
-            return None
-        return {
-            "summary": f"Adjust {widget['name']} on node {node.get('id')}",
-            "actions": [
-                {
-                    "type": "graph.set_widget",
-                    "payload": {
-                        "node_id": node.get("id"),
-                        "widget": widget["name"],
-                        "value": value,
-                    },
-                }
-            ],
-        }
-    value = _extract_value_after_set(text)
-    if not value:
-        return None
-    widget = _select_widget(node, text)
-    if widget is None:
-        return None
-    return {
-        "summary": f"Set {widget['name']} on node {node.get('id')}",
-        "actions": [
+        return [
             {
                 "type": "graph.set_widget",
                 "payload": {
                     "node_id": node.get("id"),
                     "widget": widget["name"],
-                    "value": _coerce_widget_value(value, widget),
+                    "value": value,
                 },
             }
-        ],
+            for widget, value in assignments
+        ]
+
+    delta = _extract_widget_delta(text)
+    if delta is not None:
+        widget = _select_widget(node, text)
+        if widget is None:
+            return []
+        value = _adjust_widget_value(widget, delta)
+        if value is None:
+            return []
+        return [
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "widget": widget["name"],
+                    "value": value,
+                },
+            }
+        ]
+
+    value = _extract_value_after_set(text)
+    if not value:
+        return []
+    widget = _select_widget(node, text)
+    if widget is None:
+        return []
+    return [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": node.get("id"),
+                "widget": widget["name"],
+                "value": _coerce_widget_value(value, widget),
+            },
+        }
+    ]
+
+
+def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
+    nodes = _graph_nodes(context)
+    bulk_nodes = _select_all_matching_nodes(nodes, text)
+    if bulk_nodes:
+        actions = []
+        for item in bulk_nodes:
+            actions.extend(_widget_edit_actions_for_node(text, item))
+        if actions:
+            return {
+                "summary": f"Set widget(s) on {len(bulk_nodes)} matching node(s)",
+                "actions": actions,
+            }
+
+    node = _select_node(nodes, text)
+    if node is None:
+        return None
+    actions = _widget_edit_actions_for_node(text, node)
+    if not actions:
+        return None
+    return {
+        "summary": f"Set widget(s) on node {node.get('id')}",
+        "actions": actions,
     }
 
 

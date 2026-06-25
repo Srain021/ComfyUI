@@ -259,6 +259,70 @@ def test_rule_planner_sets_multiple_widgets_on_same_node():
     ]
 
 
+def test_rule_planner_sets_widget_on_all_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把所有 KSampler 的 steps 改成 30",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "steps", "value": 20}],
+                    },
+                    {
+                        "id": 10,
+                        "type": "KSampler",
+                        "title": "Refiner KSampler",
+                        "widgets": [{"name": "steps", "value": 12}],
+                    },
+                    {
+                        "id": 11,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 30}},
+        {"type": "graph.set_widget", "payload": {"node_id": 10, "widget": "steps", "value": 30}},
+    ]
+
+
+def test_rule_planner_adjusts_widget_on_all_matching_nodes():
+    plan = RuleBasedPlanner().plan(
+        "把全部 KSampler 的 cfg 降低 1",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [{"name": "cfg", "value": 7.0}],
+                    },
+                    {
+                        "id": 10,
+                        "type": "KSampler",
+                        "title": "Refiner KSampler",
+                        "widgets": [{"name": "cfg", "value": 4.5}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 6.0}},
+        {"type": "graph.set_widget", "payload": {"node_id": 10, "widget": "cfg", "value": 3.5}},
+    ]
+
+
 def test_rule_planner_adds_checkpoint_node_with_initial_model_alias():
     plan = RuleBasedPlanner().plan(
         "添加一个 CheckpointLoaderSimple 节点，模型改成 dreamshaper.safetensors",
