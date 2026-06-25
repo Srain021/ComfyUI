@@ -277,6 +277,38 @@ def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     return rows
 
 
+def _extract_widget_delta(text: str) -> int | float | None:
+    lowered = text.lower()
+    direction = None
+    if any(
+        term in lowered or term in text
+        for term in ("提高", "调高", "增加", "raise", "increase", "higher")
+    ):
+        direction = 1
+    if any(
+        term in lowered or term in text
+        for term in ("降低", "调低", "减少", "lower", "decrease", "down")
+    ):
+        direction = -1
+    if direction is None:
+        return None
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+    if not numbers:
+        return None
+    delta = float(numbers[-1]) * direction
+    return int(delta) if delta.is_integer() else delta
+
+
+def _adjust_widget_value(widget: dict, delta: int | float) -> object | None:
+    current = widget.get("value")
+    if isinstance(current, bool) or not isinstance(current, (int, float)):
+        return None
+    value = current + delta
+    if isinstance(current, int) and float(value).is_integer():
+        return int(value)
+    return value
+
+
 def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     nodes = _graph_nodes(context)
     node = _select_node(nodes, text)
@@ -296,6 +328,27 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
                     },
                 }
                 for widget, value in assignments
+            ],
+        }
+    delta = _extract_widget_delta(text)
+    if delta is not None:
+        widget = _select_widget(node, text)
+        if widget is None:
+            return None
+        value = _adjust_widget_value(widget, delta)
+        if value is None:
+            return None
+        return {
+            "summary": f"Adjust {widget['name']} on node {node.get('id')}",
+            "actions": [
+                {
+                    "type": "graph.set_widget",
+                    "payload": {
+                        "node_id": node.get("id"),
+                        "widget": widget["name"],
+                        "value": value,
+                    },
+                }
             ],
         }
     value = _extract_value_after_set(text)
