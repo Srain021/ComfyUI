@@ -711,6 +711,57 @@ def test_rule_planner_coerces_numeric_widget_values():
     }
 
 
+def test_rule_planner_sets_sampler_steps_with_tune_to_synonym():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的步数调到 30",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 30}}
+    ]
+
+
+def test_rule_planner_sets_selected_sampler_cfg_with_set_to_synonym():
+    plan = RuleBasedPlanner().plan(
+        "把这个采样器的 CFG 设成 7.5",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "selected": True,
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 7.5}}
+    ]
+
+
 def test_rule_planner_increases_numeric_widget_from_current_value():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 提高 4",
@@ -1037,6 +1088,35 @@ def test_rule_planner_sets_checkpoint_model_by_semantic_alias():
     ]
 
 
+def test_rule_planner_sets_checkpoint_model_with_set_to_synonym():
+    plan = RuleBasedPlanner().plan(
+        "把底模设成 juggernaut.safetensors",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 31,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Load Checkpoint",
+                        "widgets": [{"name": "ckpt_name", "value": "old.safetensors"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 31,
+                "widget": "ckpt_name",
+                "value": "juggernaut.safetensors",
+            },
+        }
+    ]
+
+
 def test_rule_planner_sets_vae_model_by_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把 VAE 换成 vae-ft-mse.safetensors",
@@ -1264,6 +1344,32 @@ def test_rule_planner_sets_image_size_from_1080p_resolution_label():
     assert plan["actions"] == [
         {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1920}},
         {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 1080}},
+    ]
+
+
+def test_rule_planner_sets_vertical_1080p_resolution_with_tune_to_synonym():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的分辨率调成 1080p 竖屏",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 512},
+                            {"name": "height", "value": 512},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1080}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 1920}},
     ]
 
 
