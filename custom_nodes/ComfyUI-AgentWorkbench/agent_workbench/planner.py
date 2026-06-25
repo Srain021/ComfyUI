@@ -913,6 +913,30 @@ def _plan_runtime_queue_prompt(text: str) -> dict | None:
     }
 
 
+def _plan_runtime_interrupt(text: str) -> dict | None:
+    lowered = text.lower()
+    if any(
+        term in lowered or term in text
+        for term in (
+            "停止当前生成",
+            "停止生成",
+            "中断当前生成",
+            "中断生成",
+            "停掉当前生成",
+            "终止当前生成",
+            "interrupt generation",
+            "stop generation",
+            "cancel generation",
+            "interrupt current",
+        )
+    ):
+        return {
+            "summary": "Interrupt current ComfyUI generation",
+            "actions": [{"type": "runtime.interrupt", "payload": {}}],
+        }
+    return None
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -947,6 +971,9 @@ class RuleBasedPlanner:
         queue_prompt_plan = _plan_runtime_queue_prompt(text)
         if queue_prompt_plan is not None:
             return queue_prompt_plan
+        interrupt_plan = _plan_runtime_interrupt(text)
+        if interrupt_plan is not None:
+            return interrupt_plan
         if "swapoff" in lowered or (
             "swap" in lowered and any(term in text for term in ("关", "关闭", "禁用"))
         ):

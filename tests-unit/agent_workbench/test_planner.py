@@ -755,6 +755,12 @@ def test_rule_planner_plans_queue_current_workflow_to_front():
     assert plan["actions"] == [{"type": "runtime.queue_prompt", "payload": {"front": True}}]
 
 
+def test_rule_planner_plans_interrupt_current_generation():
+    plan = RuleBasedPlanner().plan("停止当前生成", context={})
+
+    assert plan["actions"] == [{"type": "runtime.interrupt", "payload": {}}]
+
+
 def test_rule_planner_prints_sudo_for_ollama_service_stop():
     plan = RuleBasedPlanner().plan("彻底停止 ollama 服务", context={})
 

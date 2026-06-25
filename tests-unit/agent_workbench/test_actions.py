@@ -165,6 +165,19 @@ def test_queue_prompt_requires_runtime_confirmation():
     assert plan["requires_confirmation"] is True
 
 
+def test_interrupt_generation_requires_runtime_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Interrupt current generation",
+            "actions": [{"type": "runtime.interrupt", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "runtime"
+    assert plan["required_capabilities"] == ["runtime.interrupt"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_stable_plan_hash_ignores_top_level_plan_hash():
     plan = validate_plan(
         {
@@ -208,6 +221,7 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
     ("action_type", "payload", "risk_level"),
     [
         ("runtime.free_memory", {}, "runtime"),
+        ("runtime.interrupt", {}, "runtime"),
         ("workflow.save", {"path": "workflow.json"}, "file"),
         ("custom_node.install", {"repo": "example/custom-node"}, "package"),
         ("service.restart_container", {"container": "comfyui-gb10"}, "service"),

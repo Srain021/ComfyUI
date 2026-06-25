@@ -3,6 +3,7 @@ CAPABILITY_LEVELS = {
     "graph.inspect": 0,
     "graph.edit": 1,
     "runtime.queue": 2,
+    "runtime.interrupt": 2,
     "runtime.free_memory": 2,
     "workflow.write": 3,
     "custom_node.manage": 4,

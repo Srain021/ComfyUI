@@ -21,6 +21,7 @@ def test_health_payload_names_core_capabilities():
     assert payload["name"] == "ComfyUI Agent Workbench"
     assert payload["version"] == "0.1.0"
     assert "graph.edit" in payload["capabilities"]
+    assert "runtime.interrupt" in payload["capabilities"]
     assert "custom_node.manage" in payload["capabilities"]
     assert "service.compose" in payload["capabilities"]
     assert payload["sudo_policy"] == "print_only"
