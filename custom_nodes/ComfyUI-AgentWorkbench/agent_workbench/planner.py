@@ -530,6 +530,24 @@ def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     }
 
 
+def _plan_graph_duplicate_node(text: str, context: dict) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("复制", "克隆", "duplicate", "clone")):
+        return None
+    node = _select_node(_graph_nodes(context), text)
+    if node is None:
+        return None
+    return {
+        "summary": f"Duplicate graph node {node.get('id')}",
+        "actions": [
+            {
+                "type": "graph.duplicate_node",
+                "payload": {"node_id": node.get("id"), "offset": [40, 40], "select": True},
+            }
+        ],
+    }
+
+
 def _graph_mode_from_text(text: str) -> str | None:
     lowered = text.lower()
     if "custom node" in lowered or "自定义节点" in text:
@@ -1187,6 +1205,9 @@ class RuleBasedPlanner:
         graph_delete_plan = _plan_graph_delete_node(text, context)
         if graph_delete_plan is not None:
             return graph_delete_plan
+        graph_duplicate_plan = _plan_graph_duplicate_node(text, context)
+        if graph_duplicate_plan is not None:
+            return graph_duplicate_plan
         graph_mode_plan = _plan_graph_set_mode(text, context)
         if graph_mode_plan is not None:
             return graph_mode_plan

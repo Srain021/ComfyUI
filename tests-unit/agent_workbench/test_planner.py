@@ -686,6 +686,41 @@ def test_rule_planner_deletes_all_matching_nodes():
     ]
 
 
+def test_rule_planner_duplicates_selected_node():
+    plan = RuleBasedPlanner().plan(
+        "复制这个节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 12, "type": "CLIPTextEncode", "title": "Prompt", "selected": True}
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.duplicate_node", "payload": {"node_id": 12, "offset": [40, 40], "select": True}}
+    ]
+
+
+def test_rule_planner_clones_node_by_title():
+    plan = RuleBasedPlanner().plan(
+        "克隆 KSampler 节点",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt"},
+                    {"id": 9, "type": "KSampler", "title": "KSampler"},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.duplicate_node", "payload": {"node_id": 9, "offset": [40, 40], "select": True}}
+    ]
+
+
 def test_rule_planner_bypasses_selected_node():
     plan = RuleBasedPlanner().plan(
         "绕过这个节点",

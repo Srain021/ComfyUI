@@ -113,6 +113,61 @@ function resolvePosition(pos) {
   return nextPos;
 }
 
+function cloneWidgetValue(value) {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function copyWidgetValues(source, target) {
+  const sourceWidgets = source.widgets || [];
+  const targetWidgets = target.widgets || [];
+  for (const sourceWidget of sourceWidgets) {
+    const targetWidget = targetWidgets.find((item) => item.name === sourceWidget.name);
+    if (targetWidget) {
+      targetWidget.value = cloneWidgetValue(sourceWidget.value);
+    }
+  }
+}
+
+function duplicateOffset(payload) {
+  if (payload.offset === undefined || payload.offset === null) {
+    return [40, 40];
+  }
+  return resolvePosition(payload.offset);
+}
+
+function cloneGraphNode(graph, source, payload) {
+  let copy = null;
+  if (typeof source.clone === "function") {
+    copy = source.clone();
+  } else if (globalThis.LiteGraph?.createNode) {
+    copy = globalThis.LiteGraph.createNode(source.type);
+  }
+  if (!copy) {
+    throw new Error(`Could not duplicate node: ${source.id}`);
+  }
+  delete copy.id;
+  copy.id = undefined;
+  if (typeof source.title === "string") {
+    copy.title = source.title;
+  }
+  if (source.mode !== undefined) {
+    copy.mode = source.mode;
+  }
+  const offset = duplicateOffset(payload);
+  const sourcePos = resolvePosition(source.pos || [0, 0]);
+  copy.pos = [sourcePos[0] + offset[0], sourcePos[1] + offset[1]];
+  graph.add(copy, false);
+  copyWidgetValues(source, copy);
+  return copy;
+}
+
 function repaintCanvas(graph) {
   app.canvas?.setDirty?.(true, true);
   graph.setDirtyCanvas?.(true, true);
@@ -213,6 +268,16 @@ export function applyGraphAction(action) {
     graph.remove(node);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id };
+  }
+  if (action.type === "graph.duplicate_node") {
+    const graph = currentGraph();
+    const source = requireNode(graph, action.payload.node_id);
+    const copy = cloneGraphNode(graph, source, action.payload || {});
+    markGraphDirty(graph);
+    if (action.payload.select !== false) {
+      selectGraphNode(graph, copy, false);
+    }
+    return { type: action.type, source_node_id: source.id, node_id: copy.id, pos: copy.pos };
   }
   if (action.type === "graph.set_mode") {
     const graph = currentGraph();
