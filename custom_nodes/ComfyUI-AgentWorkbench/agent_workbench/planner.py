@@ -576,6 +576,10 @@ WIDGET_ALIASES = (
         ("quality", "image quality", "jpeg quality", "webp quality", "质量", "图片质量", "输出质量", "压缩质量"),
         ("quality", "image_quality", "jpeg_quality", "webp_quality"),
     ),
+    (
+        ("format", "file format", "image format", "video format", "格式", "保存格式", "输出格式", "图片格式", "视频格式"),
+        ("format", "image_format", "video_format", "file_format"),
+    ),
     (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
     (("clip skip", "clip layer", "clip 层", "clip跳层"), ("stop_at_clip_layer",)),
     (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),

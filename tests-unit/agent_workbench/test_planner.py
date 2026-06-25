@@ -1336,6 +1336,97 @@ def test_rule_planner_sets_save_image_output_quality_by_chinese_node_alias():
     ]
 
 
+def test_rule_planner_sets_save_image_format_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 Save Image 的保存格式改成 webp",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 30,
+                        "type": "SaveImage",
+                        "title": "Save Image",
+                        "widgets": [
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "quality", "value": 80},
+                            {"name": "format", "value": "png"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 30, "widget": "format", "value": "webp"}}
+    ]
+
+
+def test_rule_planner_sets_save_image_output_format_by_chinese_node_alias():
+    plan = RuleBasedPlanner().plan(
+        "把保存图片节点的输出格式改成 webp",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 30,
+                        "type": "SaveImage",
+                        "title": "Save Image",
+                        "widgets": [
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "quality", "value": 80},
+                            {"name": "format", "value": "png"},
+                        ],
+                    },
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "format", "value": "video/h264-mp4"},
+                        ],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 30, "widget": "format", "value": "webp"}}
+    ]
+
+
+def test_rule_planner_sets_video_combine_format_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 Video Combine 的视频格式改成 video/h265-mp4",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 42,
+                        "type": "VHS_VideoCombine",
+                        "title": "Video Combine",
+                        "widgets": [
+                            {"name": "frame_rate", "value": 8},
+                            {"name": "filename_prefix", "value": "ComfyUI"},
+                            {"name": "format", "value": "video/h264-mp4"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 42, "widget": "format", "value": "video/h265-mp4"},
+        }
+    ]
+
+
 def test_rule_planner_sets_sampler_name_by_chinese_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把采样器改成 euler",
