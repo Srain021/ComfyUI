@@ -969,6 +969,28 @@ def test_rule_planner_plans_custom_node_disable_and_enable():
     ]
 
 
+def test_rule_planner_plans_custom_node_update_reinstall_and_fix():
+    update_plan = RuleBasedPlanner().plan("更新 custom node ComfyUI-TestNode", context={})
+    reinstall_plan = RuleBasedPlanner().plan("重装 custom node ComfyUI-TestNode", context={})
+    fix_plan = RuleBasedPlanner().plan("修复 custom node ComfyUI-BrokenNode", context={})
+
+    assert update_plan["actions"] == [
+        {"type": "custom_node.update", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+    assert reinstall_plan["actions"] == [
+        {"type": "custom_node.reinstall", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+    assert fix_plan["actions"] == [
+        {"type": "custom_node.fix", "payload": {"id": "ComfyUI-BrokenNode"}}
+    ]
+
+
+def test_rule_planner_plans_custom_node_update_all():
+    plan = RuleBasedPlanner().plan("更新全部 custom nodes", context={})
+
+    assert plan["actions"] == [{"type": "custom_node.update_all", "payload": {}}]
+
+
 def test_rule_planner_prints_sudo_swapoff_instead_of_executing():
     plan = RuleBasedPlanner().plan("关 swap 防止卡死", context={})
 

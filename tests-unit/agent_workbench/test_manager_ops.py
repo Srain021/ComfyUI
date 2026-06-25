@@ -38,7 +38,55 @@ def test_manager_disable_request_uses_queue_disable():
 
     assert request["path"] == "/manager/queue/disable"
     assert request["json"]["id"] == "ComfyUI-TestNode"
-    assert request["json"]["files"] == []
+    assert request["json"]["files"] == ["ComfyUI-TestNode"]
+
+
+def test_manager_update_request_uses_queue_update():
+    request = manager_request_for_action(
+        {"type": "custom_node.update", "payload": {"id": "ComfyUI-TestNode"}}
+    )
+
+    assert request["path"] == "/manager/queue/update"
+    assert request["json"] == {
+        "id": "ComfyUI-TestNode",
+        "version": "unknown",
+        "ui_id": "ComfyUI-TestNode",
+        "files": ["ComfyUI-TestNode"],
+        "channel": "default",
+        "mode": "cache",
+    }
+
+
+def test_manager_reinstall_request_uses_queue_reinstall():
+    request = manager_request_for_action(
+        {"type": "custom_node.reinstall", "payload": {"id": "ComfyUI-TestNode"}}
+    )
+
+    assert request["path"] == "/manager/queue/reinstall"
+    assert request["json"]["id"] == "ComfyUI-TestNode"
+    assert request["json"]["files"] == ["ComfyUI-TestNode"]
+
+
+def test_manager_fix_request_uses_queue_fix():
+    request = manager_request_for_action(
+        {"type": "custom_node.fix", "payload": {"id": "ComfyUI-BrokenNode"}}
+    )
+
+    assert request["path"] == "/manager/queue/fix"
+    assert request["json"]["id"] == "ComfyUI-BrokenNode"
+    assert request["json"]["files"] == ["ComfyUI-BrokenNode"]
+
+
+def test_manager_update_all_request_uses_default_mode():
+    request = manager_request_for_action(
+        {"type": "custom_node.update_all", "payload": {}}
+    )
+
+    assert request == {
+        "method": "POST",
+        "path": "/manager/queue/update_all",
+        "json": {"mode": "default"},
+    }
 
 
 def test_manager_enable_request_skips_post_install():

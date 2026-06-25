@@ -28,6 +28,21 @@ def _require_node_id(payload: dict) -> str:
     return node_id
 
 
+def _manager_node_payload(payload: dict) -> dict:
+    node_id = _require_node_id(payload)
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        files = [payload.get("path", node_id)]
+    return {
+        "id": node_id,
+        "version": payload.get("version", "unknown"),
+        "ui_id": payload.get("ui_id", node_id),
+        "files": files,
+        "channel": payload.get("channel", "default"),
+        "mode": payload.get("mode", "cache"),
+    }
+
+
 def manager_request_for_action(action: dict) -> dict:
     if not isinstance(action, dict):
         raise ManagerActionError("manager action must be an object")
@@ -45,21 +60,26 @@ def manager_request_for_action(action: dict) -> dict:
             raise ManagerActionError("manager_queue install requires node object")
         return {"method": "POST", "path": "/manager/queue/install", "json": dict(node)}
     if action_type == "custom_node.disable":
-        node_id = _require_node_id(payload)
         return {
             "method": "POST",
             "path": "/manager/queue/disable",
-            "json": {
-                "id": node_id,
-                "version": payload.get("version", "unknown"),
-                "ui_id": payload.get("ui_id", node_id),
-                "files": payload.get("files", []),
-            },
+            "json": _manager_node_payload(payload),
         }
     if action_type == "custom_node.enable":
-        node_id = _require_node_id(payload)
-        node = dict(payload)
-        node["id"] = node_id
+        node = _manager_node_payload(payload)
         node["skip_post_install"] = True
         return {"method": "POST", "path": "/manager/queue/install", "json": node}
+    if action_type in {"custom_node.update", "custom_node.reinstall", "custom_node.fix"}:
+        path = {
+            "custom_node.update": "/manager/queue/update",
+            "custom_node.reinstall": "/manager/queue/reinstall",
+            "custom_node.fix": "/manager/queue/fix",
+        }[action_type]
+        return {"method": "POST", "path": path, "json": _manager_node_payload(payload)}
+    if action_type == "custom_node.update_all":
+        return {
+            "method": "POST",
+            "path": "/manager/queue/update_all",
+            "json": {"mode": payload.get("mode", "default")},
+        }
     raise ManagerActionError(f"unsupported manager action: {action_type}")

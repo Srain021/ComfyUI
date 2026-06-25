@@ -910,6 +910,43 @@ def _extract_custom_node_id(text: str) -> str | None:
     return None
 
 
+def _mentions_custom_node(text: str) -> bool:
+    lowered = text.lower()
+    return "custom node" in lowered or "custom nodes" in lowered or "自定义节点" in text
+
+
+def _plan_custom_node_manager_action(text: str) -> dict | None:
+    if not _mentions_custom_node(text):
+        return None
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("全部", "所有", "all")) and any(
+        term in lowered or term in text for term in ("update", "更新", "升级")
+    ):
+        return {
+            "summary": "Update all custom nodes through ComfyUI-Manager",
+            "actions": [{"type": "custom_node.update_all", "payload": {}}],
+        }
+
+    action_type = None
+    if any(term in lowered or term in text for term in ("reinstall", "重装", "重新安装")):
+        action_type = "custom_node.reinstall"
+    elif any(term in lowered or term in text for term in ("fix", "修复", "repair")):
+        action_type = "custom_node.fix"
+    elif any(term in lowered or term in text for term in ("update", "更新", "升级")):
+        action_type = "custom_node.update"
+
+    if action_type is None:
+        return None
+    node_id = _extract_custom_node_id(text)
+    if not node_id:
+        return None
+    verb = action_type.removeprefix("custom_node.")
+    return {
+        "summary": f"{verb.title()} custom node {node_id}",
+        "actions": [{"type": action_type, "payload": {"id": node_id}}],
+    }
+
+
 def _extract_ollama_model(text: str) -> str | None:
     match = re.search(r"(?:模型|model)\s+([A-Za-z0-9_.:/-]+)", text, re.IGNORECASE)
     if match:
@@ -1103,6 +1140,9 @@ class RuleBasedPlanner:
                     "summary": f"Stop Ollama model {model}",
                     "actions": [{"type": "runtime.stop_ollama_model", "payload": {"model": model}}],
                 }
+        custom_node_manager_plan = _plan_custom_node_manager_action(text)
+        if custom_node_manager_plan is not None:
+            return custom_node_manager_plan
         if ("custom node" in lowered or "自定义节点" in text) and any(
             term in lowered or term in text for term in ("install", "安装")
         ):
