@@ -444,6 +444,76 @@ def test_rule_planner_sets_negative_prompt_by_semantic_alias():
     ]
 
 
+def test_rule_planner_sets_positive_and_negative_prompts_from_one_message():
+    plan = RuleBasedPlanner().plan(
+        "把正向提示词改成 neon skyline，负面提示词改成 blurry, watermark",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "neon skyline"},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "blurry, watermark"},
+        },
+    ]
+
+
+def test_rule_planner_sets_positive_and_negative_prompts_with_polite_prefix():
+    plan = RuleBasedPlanner().plan(
+        "请把正向提示词改成 neon skyline，然后把负面提示词改成 blurry, watermark",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "neon skyline"},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "blurry, watermark"},
+        },
+    ]
+
+
 def test_rule_planner_sets_positive_prompt_by_sampler_connection_role():
     plan = RuleBasedPlanner().plan(
         "把正向提示词改成 cinematic lighting",
@@ -488,6 +558,57 @@ def test_rule_planner_sets_positive_prompt_by_sampler_connection_role():
             "type": "graph.set_widget",
             "payload": {"node_id": 7, "widget": "text", "value": "cinematic lighting"},
         }
+    ]
+
+
+def test_rule_planner_sets_connected_positive_and_negative_prompts_from_one_message():
+    plan = RuleBasedPlanner().plan(
+        "把正向提示词改成 neon skyline，负面提示词改成 blurry, watermark",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP Text Encode",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                        "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP Text Encode",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                        "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING"}],
+                    },
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [
+                            {"name": "model", "type": "MODEL"},
+                            {"name": "positive", "type": "CONDITIONING"},
+                            {"name": "negative", "type": "CONDITIONING"},
+                        ],
+                    },
+                ],
+                "links": [
+                    {"id": 77, "origin_id": 7, "origin_slot": 0, "target_id": 9, "target_slot": 1},
+                    {"id": 78, "origin_id": 8, "origin_slot": 0, "target_id": 9, "target_slot": 2},
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "neon skyline"},
+        },
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "blurry, watermark"},
+        },
     ]
 
 

@@ -258,6 +258,61 @@ def _prompt_role_from_text(text: str) -> str | None:
     return None
 
 
+PROMPT_ROLE_ASSIGNMENT_TERMS = (
+    (
+        "positive",
+        "正向提示词",
+        ("正向提示词", "正面提示词", "正向 prompt", "正向prompt", "positive prompt"),
+    ),
+    (
+        "negative",
+        "负面提示词",
+        ("负面提示词", "反向提示词", "负向提示词", "负面 prompt", "负面prompt", "negative prompt"),
+    ),
+)
+
+
+def _prompt_role_assignment_matches(text: str) -> list[tuple[str, str, str]]:
+    role_lookup = {}
+    role_terms = []
+    for role, canonical_phrase, terms in PROMPT_ROLE_ASSIGNMENT_TERMS:
+        for term in terms:
+            role_lookup[term.lower()] = (role, canonical_phrase)
+            role_terms.append(term)
+
+    role_pattern = "|".join(re.escape(term) for term in sorted(role_terms, key=len, reverse=True))
+    operator_pattern = "|".join(
+        re.escape(operator)
+        for operator in sorted((*VALUE_SET_DELIMITERS, "=", "to", "as", "with"), key=len, reverse=True)
+    )
+    prefix_pattern = (
+        r"(?:然后把|然后将|接着把|接着将|并且把|并且将|并把|并将|再把|再将|把|将|给|and\s+)?"
+    )
+    pattern = re.compile(
+        rf"(?:^|[\s,，;；。]+)?{prefix_pattern}\s*"
+        rf"(?P<role>{role_pattern})\s*(?:的)?\s*(?:文本|内容|prompt|text)?\s*"
+        rf"(?:{operator_pattern})\s*",
+        re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) < 2:
+        return []
+
+    rows = []
+    seen_roles = set()
+    for index, match in enumerate(matches):
+        role, canonical_phrase = role_lookup[match.group("role").lower()]
+        if role in seen_roles:
+            return []
+        value_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        value = _strip_value(text[match.end():value_end])
+        if not value:
+            return []
+        seen_roles.add(role)
+        rows.append((role, canonical_phrase, value))
+    return rows
+
+
 def _nodes_by_id(nodes: list[dict]) -> dict[str, dict]:
     return {str(node.get("id")): node for node in nodes if node.get("id") is not None}
 
@@ -934,6 +989,42 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
         return None
     return {
         "summary": f"Set widget(s) on node {node.get('id')}",
+        "actions": actions,
+    }
+
+
+def _plan_prompt_role_assignments(text: str, context: dict) -> dict | None:
+    assignments = _prompt_role_assignment_matches(text)
+    if not assignments:
+        return None
+
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    actions = []
+    seen_targets = set()
+    for _, role_phrase, value in assignments:
+        node = _find_node_by_semantic_label(nodes, role_phrase, links)
+        if node is None:
+            return None
+        widget = _select_widget(node, f"{role_phrase} text")
+        if widget is None:
+            return None
+        target = (node.get("id"), widget["name"])
+        if target in seen_targets:
+            return None
+        seen_targets.add(target)
+        actions.append(
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "widget": widget["name"],
+                    "value": _coerce_widget_value(value, widget),
+                },
+            }
+        )
+    return {
+        "summary": f"Set prompt role widget(s) on {len(actions)} node(s)",
         "actions": actions,
     }
 
@@ -2559,6 +2650,9 @@ class RuleBasedPlanner:
         graph_add_plan = _plan_graph_add_node(graph_text)
         if graph_add_plan is not None:
             return _combine_with_followup_plans(graph_add_plan, followup_plans, graph_text, text)
+        prompt_role_plan = _plan_prompt_role_assignments(graph_text, context)
+        if prompt_role_plan is not None:
+            return _combine_with_followup_plans(prompt_role_plan, followup_plans, graph_text, text)
         graph_plan = _plan_graph_widget_edit(graph_text, context)
         if graph_plan is not None:
             return _combine_with_followup_plans(graph_plan, followup_plans, graph_text, text)
