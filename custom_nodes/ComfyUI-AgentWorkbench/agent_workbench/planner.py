@@ -1999,6 +1999,18 @@ def _combine_with_queue_prompt(plan: dict, queue_plan: dict | None, graph_text: 
     }
 
 
+def _combine_prerender_with_queue(
+    prerender_plan: dict | None,
+    queue_plan: dict | None,
+) -> dict | None:
+    if prerender_plan is None or queue_plan is None:
+        return None
+    return {
+        "summary": "Prepare memory then queue current workflow",
+        "actions": [*prerender_plan["actions"], *queue_plan["actions"]],
+    }
+
+
 def _plan_runtime_queue_prompt(text: str) -> dict | None:
     lowered = text.lower()
     if not _mentions_runtime_queue_prompt(text):
@@ -2137,6 +2149,12 @@ class RuleBasedPlanner:
         graph_plan = _plan_graph_widget_edit(graph_text, context)
         if graph_plan is not None:
             return _combine_with_queue_prompt(graph_plan, queue_prompt_plan, graph_text, text)
+        prerender_queue_plan = _combine_prerender_with_queue(
+            _plan_prerender_free_memory(text),
+            queue_prompt_plan,
+        )
+        if prerender_queue_plan is not None:
+            return prerender_queue_plan
         if queue_prompt_plan is not None:
             return queue_prompt_plan
         clear_queue_plan = _plan_runtime_clear_queue(text)

@@ -107,6 +107,22 @@ def test_prerender_free_memory_action_requires_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_prerender_free_memory_then_queue_prompt_uses_service_risk():
+    plan = validate_plan(
+        {
+            "summary": "Prepare memory then queue current workflow",
+            "actions": [
+                {"type": "service.prerender_free_memory", "payload": {}},
+                {"type": "runtime.queue_prompt", "payload": {"front": False}},
+            ],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.restart", "runtime.queue"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_service_healthcheck_is_read_only_without_extra_confirmation():
     plan = validate_plan(
         {

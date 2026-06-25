@@ -23,6 +23,24 @@ def test_rule_planner_prerender_free_memory_uses_ops_script():
     assert plan["summary"] == "Run prerender free-memory preparation"
 
 
+def test_rule_planner_prerender_free_memory_then_queues_workflow():
+    plan = RuleBasedPlanner().plan("渲染前腾内存然后开始生成当前工作流", context={})
+
+    assert plan["actions"] == [
+        {"type": "service.prerender_free_memory", "payload": {}},
+        {"type": "runtime.queue_prompt", "payload": {"front": False}},
+    ]
+
+
+def test_rule_planner_prerender_free_memory_then_queues_workflow_to_front():
+    plan = RuleBasedPlanner().plan("开渲前释放内存并插队生成当前工作流", context={})
+
+    assert plan["actions"] == [
+        {"type": "service.prerender_free_memory", "payload": {}},
+        {"type": "runtime.queue_prompt", "payload": {"front": True}},
+    ]
+
+
 def test_rule_planner_plans_service_healthcheck():
     plan = RuleBasedPlanner().plan("检查 ComfyUI 容器健康和内存", context={})
 
