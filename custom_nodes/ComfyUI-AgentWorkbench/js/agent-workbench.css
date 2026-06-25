@@ -49,7 +49,7 @@
 
 .agent-workbench-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -93,4 +93,8 @@
 
 .agent-workbench-confirm[hidden] {
   display: none;
+}
+
+#agent-workbench-cancel:not([hidden]) {
+  border-color: rgba(246, 200, 95, 0.72);
 }

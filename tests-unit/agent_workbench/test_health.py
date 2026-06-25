@@ -101,6 +101,8 @@ def test_frontend_exposes_plan_first_operator_controls():
     assert "/agent/apply" in script
     assert "currentGraphSnapshot" in script
     assert "agent-workbench-confirm" in script
+    assert "agent-workbench-cancel" in script
+    assert "user_cancelled" in script
     assert "requires_confirmation" in script
     assert "plan.confirmed" in script
 
@@ -111,6 +113,7 @@ def test_frontend_styles_plan_apply_and_confirmation_states():
     assert ".agent-workbench-actions" in stylesheet
     assert "#agent-workbench-panel button:disabled" in stylesheet
     assert ".agent-workbench-confirm[hidden]" in stylesheet
+    assert "#agent-workbench-cancel:not([hidden])" in stylesheet
 
 
 def test_frontend_wires_graph_actions_after_server_approval():

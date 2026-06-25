@@ -105,6 +105,7 @@ function createWorkbenchPanel() {
     <div class="agent-workbench-actions">
       <button id="agent-workbench-plan">Plan</button>
       <button id="agent-workbench-apply" disabled>Apply</button>
+      <button id="agent-workbench-cancel" hidden>Cancel</button>
     </div>
     <label class="agent-workbench-confirm" hidden>
       <input id="agent-workbench-confirm" type="checkbox" />
@@ -119,11 +120,13 @@ function createWorkbenchPanel() {
   const applyButton = panel.querySelector("#agent-workbench-apply");
   const confirmRow = panel.querySelector(".agent-workbench-confirm");
   const confirmCheckbox = panel.querySelector("#agent-workbench-confirm");
+  const cancelButton = panel.querySelector("#agent-workbench-cancel");
   let lastDryRun = null;
 
   function refreshApplyState() {
     const needsConfirmation = Boolean(lastDryRun?.plan?.requires_confirmation);
     confirmRow.hidden = !needsConfirmation;
+    cancelButton.hidden = !needsConfirmation;
     applyButton.disabled = !lastDryRun?.plan || (needsConfirmation && !confirmCheckbox.checked);
   }
 
@@ -147,6 +150,13 @@ function createWorkbenchPanel() {
   });
 
   confirmCheckbox.addEventListener("change", refreshApplyState);
+
+  cancelButton.addEventListener("click", () => {
+    lastDryRun = null;
+    confirmCheckbox.checked = false;
+    refreshApplyState();
+    renderJson(output, { ok: false, error: "user_cancelled" });
+  });
 
   applyButton.addEventListener("click", async () => {
     if (!lastDryRun?.plan) {
