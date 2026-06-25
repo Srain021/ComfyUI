@@ -1305,6 +1305,73 @@ def _slot_index_for_hint(node: dict, slot_key: str, hint: str | None) -> int | N
     return None
 
 
+def _slot_type(slot: dict) -> str | None:
+    value = slot.get("type")
+    return value.lower() if isinstance(value, str) and value else None
+
+
+def _slot_index_for_type(node: dict, slot_key: str, slot_type: str | None) -> int | None:
+    if slot_type is None:
+        return None
+    for index, slot in enumerate(_slot_rows(node, slot_key)):
+        if _slot_type(slot) == slot_type:
+            return index
+    return None
+
+
+def _prompt_role_from_phrase(phrase: str, node: dict) -> str | None:
+    lowered = f"{phrase} {_node_label(node)}".lower()
+    if any(term in lowered or term in phrase for term in ("正向", "正面", "positive")):
+        return "positive"
+    if any(term in lowered or term in phrase for term in ("负面", "反向", "负向", "negative")):
+        return "negative"
+    return None
+
+
+def _infer_connect_slots(
+    origin: dict,
+    target: dict,
+    origin_phrase: str,
+    target_phrase: str,
+) -> tuple[int, int] | None:
+    outputs = _slot_rows(origin, "outputs")
+    inputs = _slot_rows(target, "inputs")
+    if not outputs or not inputs:
+        return (0, 0)
+
+    role = _prompt_role_from_phrase(origin_phrase, origin)
+    if role is not None:
+        target_slot = _slot_index_for_hint(target, "inputs", role)
+        if target_slot is not None:
+            target_type = _slot_type(inputs[target_slot])
+            origin_slot = _slot_index_for_type(origin, "outputs", target_type)
+            return (origin_slot or 0, target_slot)
+
+    for origin_index, output in enumerate(outputs):
+        output_type = _slot_type(output)
+        target_index = _slot_index_for_type(target, "inputs", output_type)
+        if target_index is not None:
+            return (origin_index, target_index)
+    return (0, 0)
+
+
+def _connect_plan(origin: dict, origin_slot: int, target: dict, target_slot: int) -> dict:
+    return {
+        "summary": f"Connect node {origin.get('id')} to node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": origin_slot,
+                    "target_node_id": target.get("id"),
+                    "target_slot": target_slot,
+                },
+            }
+        ],
+    }
+
+
 def _slot_connect_plan_from_phrases(
     nodes: list[dict],
     origin_phrase: str,
@@ -1320,20 +1387,22 @@ def _slot_connect_plan_from_phrases(
     target_slot = _slot_index_for_hint(target, "inputs", target_slot_hint)
     if origin_slot is None or target_slot is None:
         return None
-    return {
-        "summary": f"Connect node {origin.get('id')} to node {target.get('id')}",
-        "actions": [
-            {
-                "type": "graph.connect",
-                "payload": {
-                    "origin_node_id": origin.get("id"),
-                    "origin_slot": origin_slot,
-                    "target_node_id": target.get("id"),
-                    "target_slot": target_slot,
-                },
-            }
-        ],
-    }
+    return _connect_plan(origin, origin_slot, target, target_slot)
+
+
+def _inferred_connect_plan_from_phrases(
+    nodes: list[dict],
+    origin_phrase: str,
+    target_phrase: str,
+) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase)
+    target = _find_node_for_phrase(nodes, target_phrase)
+    if origin is None or target is None:
+        return None
+    slots = _infer_connect_slots(origin, target, origin_phrase, target_phrase)
+    if slots is None:
+        return None
+    return _connect_plan(origin, slots[0], target, slots[1])
 
 
 def _plan_graph_connect(text: str, context: dict) -> dict | None:
@@ -1356,6 +1425,18 @@ def _plan_graph_connect(text: str, context: dict) -> dict | None:
             match.group(3),
             match.group(4),
         )
+        if plan is not None:
+            return plan
+
+    inferred_patterns = (
+        r"把\s*(.+?)\s*(?:连接到|连到|接到)\s*(.+)$",
+        r"\bconnect\s+(.+?)\s+(?:to|into)\s+(.+)$",
+    )
+    for pattern in inferred_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _inferred_connect_plan_from_phrases(nodes, match.group(1), match.group(2))
         if plan is not None:
             return plan
 

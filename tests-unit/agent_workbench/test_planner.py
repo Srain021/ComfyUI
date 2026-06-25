@@ -1793,6 +1793,86 @@ def test_rule_planner_connects_semantic_prompt_node_to_sampler_slot():
     ]
 
 
+def test_rule_planner_infers_positive_sampler_slot_when_connecting_positive_prompt():
+    plan = RuleBasedPlanner().plan(
+        "把正向提示词接到 KSampler",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING"}],
+                    },
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [
+                            {"name": "model", "type": "MODEL"},
+                            {"name": "positive", "type": "CONDITIONING"},
+                            {"name": "negative", "type": "CONDITIONING"},
+                        ],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.connect",
+            "payload": {
+                "origin_node_id": 7,
+                "origin_slot": 0,
+                "target_node_id": 9,
+                "target_slot": 1,
+            },
+        }
+    ]
+
+
+def test_rule_planner_infers_negative_sampler_slot_when_connecting_negative_prompt():
+    plan = RuleBasedPlanner().plan(
+        "把负面提示词接到 KSampler",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING"}],
+                    },
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [
+                            {"name": "model", "type": "MODEL"},
+                            {"name": "positive", "type": "CONDITIONING"},
+                            {"name": "negative", "type": "CONDITIONING"},
+                        ],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.connect",
+            "payload": {
+                "origin_node_id": 8,
+                "origin_slot": 0,
+                "target_node_id": 9,
+                "target_slot": 2,
+            },
+        }
+    ]
+
+
 def test_rule_planner_disconnects_target_input_by_title_and_slot_name():
     plan = RuleBasedPlanner().plan(
         "断开 KSampler 的 positive 输入",
