@@ -16,7 +16,7 @@ def _context_plan(message: str) -> dict:
 
 def _strip_value(value: str) -> str:
     cleaned = value.strip()
-    cleaned = cleaned.strip(" \t\r\n'\"`.,，。:：")
+    cleaned = cleaned.strip(" \t\r\n'\"`.,，。:：;；")
     cleaned = cleaned.strip("“”‘’")
     return cleaned
 
@@ -203,13 +203,69 @@ def _select_widget(node: dict, text: str) -> dict | None:
     ) or widgets[0]
 
 
+def _widget_hint_map(node: dict) -> dict[str, dict]:
+    widgets = _node_widgets(node)
+    hints = {}
+    for widget in widgets:
+        hints[widget["name"].lower()] = widget
+    for triggers, names in WIDGET_ALIASES:
+        widget = _find_widget_by_name(widgets, names)
+        if widget is None:
+            continue
+        for hint in (*triggers, *names):
+            hints[hint.lower()] = widget
+    return hints
+
+
+def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
+    hints = _widget_hint_map(node)
+    if not hints:
+        return []
+    hint_pattern = "|".join(re.escape(hint) for hint in sorted(hints, key=len, reverse=True))
+    pattern = re.compile(
+        rf"(?P<hint>{hint_pattern})\s*(?:改成|改为|设置为|设为|变成|=)\s*",
+        re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(text))
+    rows = []
+    seen_widgets = set()
+    for index, match in enumerate(matches):
+        value_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        raw_value = text[match.end():value_end]
+        value = _strip_value(raw_value)
+        if not value:
+            continue
+        widget = hints[match.group("hint").lower()]
+        if widget["name"] in seen_widgets:
+            continue
+        seen_widgets.add(widget["name"])
+        rows.append((widget, _coerce_widget_value(value, widget)))
+    return rows
+
+
 def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
-    value = _extract_value_after_set(text)
-    if not value:
-        return None
     nodes = _graph_nodes(context)
     node = _select_node(nodes, text)
     if node is None:
+        return None
+    assignments = _widget_assignments(text, node)
+    if assignments:
+        return {
+            "summary": f"Set {len(assignments)} widget(s) on node {node.get('id')}",
+            "actions": [
+                {
+                    "type": "graph.set_widget",
+                    "payload": {
+                        "node_id": node.get("id"),
+                        "widget": widget["name"],
+                        "value": value,
+                    },
+                }
+                for widget, value in assignments
+            ],
+        }
+    value = _extract_value_after_set(text)
+    if not value:
         return None
     widget = _select_widget(node, text)
     if widget is None:

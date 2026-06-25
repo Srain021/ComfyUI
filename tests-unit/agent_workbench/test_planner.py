@@ -125,6 +125,34 @@ def test_rule_planner_coerces_numeric_widget_values():
     }
 
 
+def test_rule_planner_sets_multiple_widgets_on_same_node():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的 steps 改成 28，cfg 改成 7.5，seed 改成 12345",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                            {"name": "seed", "value": 1},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "steps", "value": 28}},
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 7.5}},
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "seed", "value": 12345}},
+    ]
+
+
 def test_rule_planner_adds_node_from_natural_language():
     plan = RuleBasedPlanner().plan("添加一个 KSampler 节点", context={"graph_input": {"nodes": []}})
 
