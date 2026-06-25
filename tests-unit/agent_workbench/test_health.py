@@ -96,6 +96,7 @@ def test_frontend_panel_creation_is_idempotent():
 
 def test_frontend_exposes_plan_first_operator_controls():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+    state_module = (AGENT_ROOT / "js" / "workbench-state.mjs").read_text()
 
     assert "/agent/context" in script
     assert "/agent/plan" in script
@@ -104,9 +105,9 @@ def test_frontend_exposes_plan_first_operator_controls():
     assert "currentGraphSnapshot" in script
     assert "agent-workbench-confirm" in script
     assert "agent-workbench-cancel" in script
-    assert "user_cancelled" in script
-    assert "requires_confirmation" in script
-    assert "plan.confirmed" in script
+    assert "user_cancelled" in state_module
+    assert "requires_confirmation" in state_module
+    assert "plan.confirmed" in state_module
 
 
 def test_frontend_graph_snapshot_includes_slots_for_connection_planning():

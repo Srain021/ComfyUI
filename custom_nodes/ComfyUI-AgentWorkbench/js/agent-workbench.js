@@ -1,6 +1,11 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { applyGraphActions } from "./graph-actions.js";
+import {
+  buildApplyRequest,
+  cancelDryRunState,
+  controlStateForDryRun,
+} from "./workbench-state.mjs";
 
 const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
 const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
@@ -185,10 +190,10 @@ function createWorkbenchPanel() {
   let lastDryRun = null;
 
   function refreshApplyState() {
-    const needsConfirmation = Boolean(lastDryRun?.plan?.requires_confirmation);
-    confirmRow.hidden = !needsConfirmation;
-    cancelButton.hidden = !needsConfirmation;
-    applyButton.disabled = !lastDryRun?.plan || (needsConfirmation && !confirmCheckbox.checked);
+    const state = controlStateForDryRun(lastDryRun, confirmCheckbox.checked);
+    confirmRow.hidden = state.confirmHidden;
+    cancelButton.hidden = state.cancelHidden;
+    applyButton.disabled = state.applyDisabled;
   }
 
   panel.querySelector("#agent-workbench-context").addEventListener("click", async () => {
@@ -213,25 +218,21 @@ function createWorkbenchPanel() {
   confirmCheckbox.addEventListener("change", refreshApplyState);
 
   cancelButton.addEventListener("click", () => {
-    lastDryRun = null;
-    confirmCheckbox.checked = false;
+    const cancelled = cancelDryRunState();
+    lastDryRun = cancelled.lastDryRun;
+    confirmCheckbox.checked = cancelled.confirmChecked;
     refreshApplyState();
-    renderJson(output, { ok: false, error: "user_cancelled" });
+    renderJson(output, cancelled.output);
   });
 
   applyButton.addEventListener("click", async () => {
     if (!lastDryRun?.plan) {
       return;
     }
-    const plan = { ...lastDryRun.plan };
-    if (lastDryRun.plan.requires_confirmation) {
-      plan.confirmed = confirmCheckbox.checked;
-    }
-    const approvedHash = lastDryRun.plan.plan_hash;
-    const result = await postJson("/agent/apply", {
-      plan,
-      approved_hash: approvedHash,
-    });
+    const applyRequest = buildApplyRequest(lastDryRun, confirmCheckbox.checked);
+    const plan = applyRequest.plan;
+    const approvedHash = applyRequest.approved_hash;
+    const result = await postJson("/agent/apply", applyRequest);
     if (result.ok) {
       try {
         result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
