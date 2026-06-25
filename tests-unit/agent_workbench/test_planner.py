@@ -738,6 +738,41 @@ def test_rule_planner_adds_checkpoint_node_with_initial_model_alias():
     ]
 
 
+def test_rule_planner_sets_checkpoint_model_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把底模换成 juggernaut.safetensors",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 31,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Load Checkpoint",
+                        "widgets": [{"name": "ckpt_name", "value": "old.safetensors"}],
+                    },
+                    {
+                        "id": 32,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 31,
+                "widget": "ckpt_name",
+                "value": "juggernaut.safetensors",
+            },
+        }
+    ]
+
+
 def test_rule_planner_sets_denoise_widget_by_chinese_alias():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的重绘幅度改成 0.55",

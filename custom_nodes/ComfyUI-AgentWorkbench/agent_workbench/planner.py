@@ -163,6 +163,10 @@ NODE_LABEL_ALIASES = (
         ("negative prompt", "negative"),
     ),
     (
+        ("checkpoint", "ckpt", "底模", "大模型"),
+        ("checkpointloader", "checkpointloadersimple", "load checkpoint", "checkpoint"),
+    ),
+    (
         ("clip skip", "clip layer", "clip 层", "clip跳层"),
         ("clipsetlastlayer", "clip set last layer"),
     ),
