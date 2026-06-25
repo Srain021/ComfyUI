@@ -117,6 +117,36 @@ def _node_label(node: dict) -> str:
     return " ".join(parts).strip()
 
 
+NODE_LABEL_ALIASES = (
+    (
+        ("正向提示词", "正面提示词", "正向 prompt", "正向prompt", "positive prompt", "positive"),
+        ("positive prompt", "positive"),
+    ),
+    (
+        ("负面提示词", "反向提示词", "负向提示词", "负面 prompt", "负面prompt", "negative prompt", "negative"),
+        ("negative prompt", "negative"),
+    ),
+)
+
+
+def _find_node_by_semantic_label(nodes: list[dict], text: str) -> dict | None:
+    lowered = text.lower()
+    for triggers, label_candidates in NODE_LABEL_ALIASES:
+        if not any(trigger in lowered or trigger in text for trigger in triggers):
+            continue
+        matches = []
+        for node in nodes:
+            label_lower = _node_label(node).lower()
+            for candidate in label_candidates:
+                if candidate in label_lower:
+                    matches.append((len(candidate), node))
+                    break
+        if matches:
+            matches.sort(key=lambda item: item[0], reverse=True)
+            return matches[0][1]
+    return None
+
+
 def _find_node_by_label(nodes: list[dict], text: str) -> dict | None:
     lowered = text.lower()
     matches = []
@@ -145,6 +175,10 @@ def _select_node(nodes: list[dict], text: str) -> dict | None:
     selected = _selected_nodes(nodes)
     if _message_mentions_current_node(text) and len(selected) == 1:
         return selected[0]
+
+    semantic = _find_node_by_semantic_label(nodes, text)
+    if semantic is not None:
+        return semantic
 
     labelled = _find_node_by_label(nodes, text)
     if labelled is not None:

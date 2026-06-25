@@ -98,6 +98,68 @@ def test_rule_planner_sets_widget_by_node_title():
     }
 
 
+def test_rule_planner_sets_positive_prompt_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把正向提示词改成 cinematic lighting",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "cinematic lighting"},
+        }
+    ]
+
+
+def test_rule_planner_sets_negative_prompt_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把负面提示词改成 blurry, low quality",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": "blurry, low quality"},
+        }
+    ]
+
+
 def test_rule_planner_coerces_numeric_widget_values():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 改成 28",
