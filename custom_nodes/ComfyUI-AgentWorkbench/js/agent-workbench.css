@@ -41,3 +41,56 @@
   background: #0c0f14;
   color: #dbe6f4;
 }
+
+#agent-workbench-panel,
+#agent-workbench-panel * {
+  box-sizing: border-box;
+}
+
+.agent-workbench-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+#agent-workbench-panel button {
+  min-height: 32px;
+  border: 1px solid rgba(180, 190, 205, 0.35);
+  border-radius: 6px;
+  background: #202633;
+  color: #f4f7fb;
+  cursor: pointer;
+}
+
+#agent-workbench-panel button:hover:not(:disabled) {
+  border-color: rgba(88, 213, 169, 0.72);
+  background: #263246;
+}
+
+#agent-workbench-panel button:focus-visible,
+#agent-workbench-input:focus-visible,
+.agent-workbench-confirm input:focus-visible {
+  outline: 2px solid #58d5a9;
+  outline-offset: 2px;
+}
+
+#agent-workbench-apply:not(:disabled) {
+  border-color: rgba(88, 213, 169, 0.72);
+}
+
+#agent-workbench-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.agent-workbench-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: #f6c85f;
+}
+
+.agent-workbench-confirm[hidden] {
+  display: none;
+}

@@ -3,6 +3,9 @@ import { api } from "../../scripts/api.js";
 
 const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
 const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
+const MAX_GRAPH_NODES = 500;
+const MAX_GRAPH_LINKS = 1000;
+const MAX_WIDGET_VALUE_LENGTH = 500;
 
 function loadWorkbenchStylesheet() {
   if (document.getElementById(WORKBENCH_STYLESHEET_ID)) {
@@ -16,6 +19,57 @@ function loadWorkbenchStylesheet() {
   document.head.appendChild(link);
 }
 
+function boundedValue(value) {
+  if (typeof value === "string" && value.length > MAX_WIDGET_VALUE_LENGTH) {
+    return `${value.slice(0, MAX_WIDGET_VALUE_LENGTH)}...`;
+  }
+  return value;
+}
+
+function currentGraphSnapshot() {
+  const graph = app.graph;
+  const links = graph?.links || [];
+  const linkRows = Array.isArray(links) ? links : Object.values(links);
+  return {
+    nodes: (graph?._nodes || []).slice(0, MAX_GRAPH_NODES).map((node) => ({
+      id: node.id,
+      type: node.type,
+      title: node.title,
+      pos: node.pos,
+      selected: Boolean(node.selected),
+      widgets: (node.widgets || []).map((widget) => ({
+        name: widget.name,
+        value: boundedValue(widget.value),
+      })),
+    })),
+    links: linkRows.slice(0, MAX_GRAPH_LINKS).filter(Boolean).map((link) => ({
+      id: link.id,
+      origin_id: link.origin_id,
+      origin_slot: link.origin_slot,
+      target_id: link.target_id,
+      target_slot: link.target_slot,
+      type: link.type,
+    })),
+  };
+}
+
+async function postJson(path, body) {
+  const response = await api.fetchApi(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({ ok: false, error: "invalid_json_response" }));
+  if (!response.ok && typeof payload === "object" && payload !== null) {
+    payload.http_status = response.status;
+  }
+  return payload;
+}
+
+function renderJson(element, value) {
+  element.textContent = JSON.stringify(value, null, 2);
+}
+
 function createWorkbenchPanel() {
   if (document.getElementById("agent-workbench-panel")) {
     return;
@@ -25,19 +79,69 @@ function createWorkbenchPanel() {
   panel.id = "agent-workbench-panel";
   panel.innerHTML = `
     <header>
-      <strong>Agent</strong>
-      <button id="agent-workbench-refresh" title="Refresh context">Refresh</button>
+      <strong>Agent Workbench</strong>
+      <button id="agent-workbench-context" title="Refresh context">Context</button>
     </header>
-    <textarea id="agent-workbench-input" placeholder="Tell the Agent what to inspect or change"></textarea>
-    <button id="agent-workbench-plan">Plan</button>
-    <pre id="agent-workbench-output">Agent Workbench ready.</pre>
+    <textarea id="agent-workbench-input" placeholder="Describe the ComfyUI operation"></textarea>
+    <div class="agent-workbench-actions">
+      <button id="agent-workbench-plan">Plan</button>
+      <button id="agent-workbench-apply" disabled>Apply</button>
+    </div>
+    <label class="agent-workbench-confirm" hidden>
+      <input id="agent-workbench-confirm" type="checkbox" />
+      <span>Confirm elevated action</span>
+    </label>
+    <pre id="agent-workbench-output">Ready.</pre>
   `;
   document.body.appendChild(panel);
 
+  const input = panel.querySelector("#agent-workbench-input");
   const output = panel.querySelector("#agent-workbench-output");
-  panel.querySelector("#agent-workbench-refresh").addEventListener("click", async () => {
-    const response = await api.fetchApi("/agent/health");
-    output.textContent = JSON.stringify(await response.json(), null, 2);
+  const applyButton = panel.querySelector("#agent-workbench-apply");
+  const confirmRow = panel.querySelector(".agent-workbench-confirm");
+  const confirmCheckbox = panel.querySelector("#agent-workbench-confirm");
+  let lastDryRun = null;
+
+  function refreshApplyState() {
+    const needsConfirmation = Boolean(lastDryRun?.plan?.requires_confirmation);
+    confirmRow.hidden = !needsConfirmation;
+    applyButton.disabled = !lastDryRun?.plan || (needsConfirmation && !confirmCheckbox.checked);
+  }
+
+  panel.querySelector("#agent-workbench-context").addEventListener("click", async () => {
+    applyButton.disabled = true;
+    lastDryRun = null;
+    confirmCheckbox.checked = false;
+    refreshApplyState();
+    renderJson(output, await postJson("/agent/context", { graph: currentGraphSnapshot() }));
+  });
+
+  panel.querySelector("#agent-workbench-plan").addEventListener("click", async () => {
+    const summary = input.value.trim() || "Inspect current ComfyUI context";
+    confirmCheckbox.checked = false;
+    lastDryRun = await postJson("/agent/dry-run", {
+      summary,
+      actions: [{ type: "context.collect", payload: { graph: currentGraphSnapshot() } }],
+    });
+    refreshApplyState();
+    renderJson(output, lastDryRun);
+  });
+
+  confirmCheckbox.addEventListener("change", refreshApplyState);
+
+  applyButton.addEventListener("click", async () => {
+    if (!lastDryRun?.plan) {
+      return;
+    }
+    const plan = { ...lastDryRun.plan };
+    if (lastDryRun.plan.requires_confirmation) {
+      plan.confirmed = confirmCheckbox.checked;
+    }
+    const result = await postJson("/agent/apply", {
+      plan,
+      approved_hash: lastDryRun.plan.plan_hash,
+    });
+    renderJson(output, result);
   });
 }
 

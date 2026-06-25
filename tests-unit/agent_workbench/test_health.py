@@ -7,14 +7,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
 from agent_workbench import routes as agent_routes
 from agent_workbench.health import CORE_CAPABILITIES, build_health_payload
-
 
 def test_health_payload_names_core_capabilities():
     payload = build_health_payload()
@@ -27,14 +25,12 @@ def test_health_payload_names_core_capabilities():
     assert "service.compose" in payload["capabilities"]
     assert payload["sudo_policy"] == "print_only"
 
-
 def test_health_payload_capabilities_are_isolated_from_module_constant():
     payload = build_health_payload()
 
     assert payload["capabilities"] is not CORE_CAPABILITIES
     payload["capabilities"].append("mutated")
     assert "mutated" not in build_health_payload()["capabilities"]
-
 
 def test_register_routes_adds_agent_health_get_route():
     agent_routes._REGISTERED = False
@@ -56,7 +52,6 @@ def test_register_routes_adds_agent_health_get_route():
         assert json.loads(response.text)["ok"] is True
     finally:
         agent_routes._REGISTERED = False
-
 
 def test_custom_node_entrypoint_exposes_frontend_extension(monkeypatch):
     module_name = "agent_workbench_custom_node_entrypoint"
@@ -86,7 +81,6 @@ def test_custom_node_entrypoint_exposes_frontend_extension(monkeypatch):
     assert (web_root / "agent-workbench.js").is_file()
     assert (web_root / "agent-workbench.css").is_file()
 
-
 def test_frontend_loads_stylesheet_without_css_module_import():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 
@@ -94,8 +88,25 @@ def test_frontend_loads_stylesheet_without_css_module_import():
     assert "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css" in script
     assert 'document.createElement("link")' in script
 
-
 def test_frontend_panel_creation_is_idempotent():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 
     assert 'document.getElementById("agent-workbench-panel")' in script
+
+def test_frontend_exposes_plan_first_operator_controls():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+
+    assert "/agent/context" in script
+    assert "/agent/dry-run" in script
+    assert "/agent/apply" in script
+    assert "currentGraphSnapshot" in script
+    assert "agent-workbench-confirm" in script
+    assert "requires_confirmation" in script
+    assert "plan.confirmed" in script
+
+def test_frontend_styles_plan_apply_and_confirmation_states():
+    stylesheet = (AGENT_ROOT / "js" / "agent-workbench.css").read_text()
+
+    assert ".agent-workbench-actions" in stylesheet
+    assert "#agent-workbench-panel button:disabled" in stylesheet
+    assert ".agent-workbench-confirm[hidden]" in stylesheet
