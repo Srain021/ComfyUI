@@ -87,6 +87,21 @@ def test_manager_uninstall_request_uses_queue_uninstall():
     assert request["json"]["files"] == ["ComfyUI-TestNode"]
 
 
+def test_manager_switch_version_request_uses_queue_install_with_selected_version():
+    request = manager_request_for_action(
+        {
+            "type": "custom_node.switch_version",
+            "payload": {"id": "ComfyUI-TestNode", "version": "1.2.3"},
+        }
+    )
+
+    assert request["method"] == "POST"
+    assert request["path"] == "/manager/queue/install"
+    assert request["json"]["id"] == "ComfyUI-TestNode"
+    assert request["json"]["version"] == "1.2.3"
+    assert request["json"]["selected_version"] == "1.2.3"
+
+
 def test_manager_update_all_request_uses_default_mode():
     request = manager_request_for_action(
         {"type": "custom_node.update_all", "payload": {}}

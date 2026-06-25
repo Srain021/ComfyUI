@@ -43,6 +43,7 @@ ACTION_REGISTRY = {
     "custom_node.reinstall": ("custom_node.manage", "package"),
     "custom_node.fix": ("custom_node.manage", "package"),
     "custom_node.uninstall": ("custom_node.manage", "package"),
+    "custom_node.switch_version": ("custom_node.manage", "package"),
     "compose.set_reserve_vram": ("service.compose", "service"),
     "compose.set_command_flag": ("service.compose", "service"),
     "service.compose_up": ("service.compose", "service"),
@@ -68,6 +69,7 @@ FRONTEND_MEDIATED_ACTIONS = {
     "custom_node.reinstall",
     "custom_node.fix",
     "custom_node.uninstall",
+    "custom_node.switch_version",
 }
 SERVER_DEFERABLE_ACTIONS = {
     "workflow.save",

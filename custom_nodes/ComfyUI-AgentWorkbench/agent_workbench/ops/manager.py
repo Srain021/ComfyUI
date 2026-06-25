@@ -43,6 +43,15 @@ def _manager_node_payload(payload: dict) -> dict:
     }
 
 
+def _switch_version_payload(payload: dict) -> dict:
+    version = payload.get("version")
+    if not isinstance(version, str) or not version:
+        raise ManagerActionError("custom node switch_version requires version")
+    node = _manager_node_payload({**payload, "version": version})
+    node["selected_version"] = version
+    return node
+
+
 def manager_request_for_action(action: dict) -> dict:
     if not isinstance(action, dict):
         raise ManagerActionError("manager action must be an object")
@@ -69,6 +78,12 @@ def manager_request_for_action(action: dict) -> dict:
         node = _manager_node_payload(payload)
         node["skip_post_install"] = True
         return {"method": "POST", "path": "/manager/queue/install", "json": node}
+    if action_type == "custom_node.switch_version":
+        return {
+            "method": "POST",
+            "path": "/manager/queue/install",
+            "json": _switch_version_payload(payload),
+        }
     if action_type in {
         "custom_node.update",
         "custom_node.reinstall",

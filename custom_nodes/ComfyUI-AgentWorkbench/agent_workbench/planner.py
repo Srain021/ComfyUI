@@ -2109,8 +2109,19 @@ def _extract_custom_node_id(text: str) -> str | None:
     if match:
         return match.group(1).rstrip(".,，。")
     match = re.search(
-        r"(?:安装|禁用|启用|更新|升级|重装|重新安装|修复|卸载|移除|删除|install|disable|enable|update|reinstall|fix|uninstall|remove|delete)?\s*"
+        r"(?:安装|禁用|启用|更新|升级|重装|重新安装|修复|卸载|移除|删除|切换|install|disable|enable|update|reinstall|fix|uninstall|remove|delete|switch)?\s*"
         r"([A-Za-z0-9_.:/-]+)\s*(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).rstrip(".,，。")
+    return None
+
+
+def _extract_custom_node_version(text: str) -> str | None:
+    match = re.search(
+        r"(?:版本|version|ver|tag)\s*([A-Za-z0-9_.:-]+)",
         text,
         re.IGNORECASE,
     )
@@ -2141,6 +2152,8 @@ def _plan_custom_node_manager_action(text: str) -> dict | None:
         action_type = "custom_node.reinstall"
     elif any(term in lowered or term in text for term in ("fix", "修复", "repair")):
         action_type = "custom_node.fix"
+    elif any(term in lowered or term in text for term in ("switch", "切换")):
+        action_type = "custom_node.switch_version"
     elif any(term in lowered or term in text for term in ("uninstall", "remove", "卸载", "移除")):
         action_type = "custom_node.uninstall"
     elif any(term in lowered or term in text for term in ("update", "更新", "升级")):
@@ -2151,6 +2164,16 @@ def _plan_custom_node_manager_action(text: str) -> dict | None:
     node_id = _extract_custom_node_id(text)
     if not node_id:
         return None
+    if action_type == "custom_node.switch_version":
+        version = _extract_custom_node_version(text)
+        if not version:
+            return None
+        return {
+            "summary": f"Switch custom node {node_id} to version {version}",
+            "actions": [
+                {"type": action_type, "payload": {"id": node_id, "version": version}}
+            ],
+        }
     verb = action_type.removeprefix("custom_node.")
     return {
         "summary": f"{verb.title()} custom node {node_id}",

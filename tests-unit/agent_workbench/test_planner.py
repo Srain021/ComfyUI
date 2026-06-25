@@ -3230,6 +3230,21 @@ def test_rule_planner_plans_custom_node_uninstall_and_plugin_remove():
     ]
 
 
+def test_rule_planner_plans_custom_node_version_switch():
+    plan = RuleBasedPlanner().plan(
+        "把 ComfyUI-Impact-Pack 插件切换到版本 1.2.3 然后重启 ComfyUI",
+        context={},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "custom_node.switch_version",
+            "payload": {"id": "ComfyUI-Impact-Pack", "version": "1.2.3"},
+        },
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
 def test_rule_planner_plans_custom_node_update_reinstall_and_fix():
     update_plan = RuleBasedPlanner().plan("更新 custom node ComfyUI-TestNode", context={})
     reinstall_plan = RuleBasedPlanner().plan("重装 custom node ComfyUI-TestNode", context={})
