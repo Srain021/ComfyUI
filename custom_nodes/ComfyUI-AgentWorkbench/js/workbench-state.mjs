@@ -37,6 +37,20 @@ export function buildApplyRequest(lastDryRun, confirmChecked, browserWorkflow = 
   return request;
 }
 
+export function contextRefreshState() {
+  return {
+    lastDryRun: null,
+    confirmChecked: false,
+  };
+}
+
+export function planCompletionState(dryRun) {
+  return {
+    lastDryRun: dryRun,
+    confirmChecked: false,
+  };
+}
+
 export function cancelDryRunState() {
   return {
     lastDryRun: null,

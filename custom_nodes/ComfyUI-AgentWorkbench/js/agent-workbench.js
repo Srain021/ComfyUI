@@ -5,7 +5,9 @@ import {
   applyCompletionState,
   buildApplyRequest,
   cancelDryRunState,
+  contextRefreshState,
   controlStateForDryRun,
+  planCompletionState,
   planNeedsBrowserWorkflow,
 } from "./workbench-state.mjs";
 
@@ -208,8 +210,9 @@ function createWorkbenchPanel() {
 
   panel.querySelector("#agent-workbench-context").addEventListener("click", async () => {
     applyButton.disabled = true;
-    lastDryRun = null;
-    confirmCheckbox.checked = false;
+    const state = contextRefreshState();
+    lastDryRun = state.lastDryRun;
+    confirmCheckbox.checked = state.confirmChecked;
     refreshApplyState();
     renderJson(output, await postJson("/agent/context", { graph: currentGraphSnapshot() }));
   });
@@ -217,10 +220,12 @@ function createWorkbenchPanel() {
   panel.querySelector("#agent-workbench-plan").addEventListener("click", async () => {
     const message = input.value.trim() || "Inspect current ComfyUI context";
     confirmCheckbox.checked = false;
-    lastDryRun = await postJson("/agent/plan", {
+    const planned = planCompletionState(await postJson("/agent/plan", {
       message,
       graph: currentGraphSnapshot(),
-    });
+    }));
+    lastDryRun = planned.lastDryRun;
+    confirmCheckbox.checked = planned.confirmChecked;
     refreshApplyState();
     renderJson(output, lastDryRun);
   });

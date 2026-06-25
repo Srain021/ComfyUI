@@ -5,7 +5,9 @@ import {
   applyCompletionState,
   buildApplyRequest,
   cancelDryRunState,
+  contextRefreshState,
   controlStateForDryRun,
+  planCompletionState,
   planNeedsBrowserWorkflow,
 } from "../../../custom_nodes/ComfyUI-AgentWorkbench/js/workbench-state.mjs";
 
@@ -247,5 +249,60 @@ test("failed apply preserves active plan for retry or cancellation", () => {
   assert.deepEqual(applyCompletionState({ ok: false, error: "boom" }, dryRun, true), {
     lastDryRun: dryRun,
     confirmChecked: true,
+  });
+});
+
+test("ui state smoke flow covers context plan confirm cancel and apply", () => {
+  const elevated = {
+    plan: {
+      summary: "Restart ComfyUI",
+      actions: [{ type: "service.restart_container", payload: { container: "comfyui-gb10" } }],
+      requires_confirmation: true,
+      plan_hash: "restart123",
+    },
+  };
+  const canvas = {
+    plan: {
+      summary: "Edit prompt",
+      actions: [{ type: "graph.set_widget", payload: { node_id: 12, widget: "text", value: "neon" } }],
+      requires_confirmation: false,
+      plan_hash: "canvas123",
+    },
+  };
+
+  const contextState = contextRefreshState();
+  assert.deepEqual(controlStateForDryRun(contextState.lastDryRun, contextState.confirmChecked), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: true,
+    applyDisabled: true,
+  });
+
+  const plannedElevated = planCompletionState(elevated);
+  assert.deepEqual(controlStateForDryRun(plannedElevated.lastDryRun, plannedElevated.confirmChecked), {
+    needsConfirmation: true,
+    confirmHidden: false,
+    cancelHidden: false,
+    applyDisabled: true,
+  });
+  assert.equal(controlStateForDryRun(plannedElevated.lastDryRun, true).applyDisabled, false);
+
+  const cancelled = cancelDryRunState();
+  assert.deepEqual(controlStateForDryRun(cancelled.lastDryRun, cancelled.confirmChecked), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: true,
+    applyDisabled: true,
+  });
+
+  const plannedCanvas = planCompletionState(canvas);
+  assert.equal(controlStateForDryRun(plannedCanvas.lastDryRun, plannedCanvas.confirmChecked).applyDisabled, false);
+
+  const applied = applyCompletionState({ ok: true }, plannedCanvas.lastDryRun, plannedCanvas.confirmChecked);
+  assert.deepEqual(controlStateForDryRun(applied.lastDryRun, applied.confirmChecked), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: true,
+    applyDisabled: true,
   });
 });
