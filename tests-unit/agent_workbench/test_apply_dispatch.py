@@ -55,6 +55,36 @@ def test_apply_dispatches_confirmed_compose_change(tmp_path):
     ]
 
 
+def test_apply_dispatches_confirmed_compose_up(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Apply compose config",
+            "actions": [{"type": "service.compose_up", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "service.compose_up"
+    assert executor.commands[-1] == [
+        "docker",
+        "compose",
+        "-f",
+        "dgx_spark_ltx_setup/docker-compose.yml",
+        "up",
+        "-d",
+    ]
+
+
 def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_path):
     dry_run = dry_run_plan(
         {

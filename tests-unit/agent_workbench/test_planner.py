@@ -131,6 +131,23 @@ def test_rule_planner_adds_node_from_natural_language():
     assert plan["actions"] == [{"type": "graph.add_node", "payload": {"node_type": "KSampler"}}]
 
 
+def test_rule_planner_adds_node_with_initial_prompt_widget():
+    plan = RuleBasedPlanner().plan(
+        "添加一个 CLIPTextEncode 节点，prompt 改成 cinematic lighting",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "CLIPTextEncode",
+                "widgets": {"text": "cinematic lighting"},
+            },
+        }
+    ]
+
+
 def test_rule_planner_connects_two_nodes_by_id():
     plan = RuleBasedPlanner().plan(
         "把 1 号节点连接到 2 号节点",
@@ -249,6 +266,28 @@ def test_rule_planner_plans_stop_ollama_model():
     assert plan["actions"] == [
         {"type": "runtime.stop_ollama_model", "payload": {"model": "nemotron-3-nano:30b"}}
     ]
+
+
+def test_rule_planner_prints_sudo_for_ollama_service_stop():
+    plan = RuleBasedPlanner().plan("彻底停止 ollama 服务", context={})
+
+    assert plan["actions"][0]["type"] == "sudo.print_command"
+    assert plan["actions"][0]["payload"]["command"] == "sudo systemctl stop ollama"
+    assert "ollama" in plan["actions"][0]["payload"]["why"].lower()
+
+
+def test_rule_planner_prints_sudo_for_gpu_clock_lock():
+    plan = RuleBasedPlanner().plan("锁频防止断电", context={})
+
+    assert plan["actions"][0]["type"] == "sudo.print_command"
+    assert plan["actions"][0]["payload"]["command"] == "sudo nvidia-smi -lgc 300,2100"
+    assert "clock" in plan["actions"][0]["payload"]["why"].lower()
+
+
+def test_rule_planner_plans_compose_up_to_apply_config():
+    plan = RuleBasedPlanner().plan("应用 compose 配置并重建 ComfyUI 服务", context={})
+
+    assert plan["actions"] == [{"type": "service.compose_up", "payload": {}}]
 
 
 def test_rule_planner_plans_custom_node_install_from_git_url():

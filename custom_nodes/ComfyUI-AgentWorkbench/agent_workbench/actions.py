@@ -26,6 +26,7 @@ ACTION_REGISTRY = {
     "custom_node.disable": ("custom_node.manage", "package"),
     "custom_node.enable": ("custom_node.manage", "package"),
     "compose.set_reserve_vram": ("service.compose", "service"),
+    "service.compose_up": ("service.compose", "service"),
     "service.restart_container": ("service.restart", "service"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
@@ -133,6 +134,11 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
             ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
         )
         return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "service.compose_up":
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "command": command_result}
     if action_type == "service.restart_container":
         container = payload.get("container", "comfyui-gb10")
         return {"type": action_type, "command": executor.run_command(["docker", "restart", container])}

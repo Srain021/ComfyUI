@@ -67,6 +67,19 @@ def test_service_actions_require_explicit_approval():
     assert plan["requires_confirmation"] is True
 
 
+def test_compose_up_action_requires_explicit_approval():
+    plan = validate_plan(
+        {
+            "summary": "Apply compose config",
+            "actions": [{"type": "service.compose_up", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.compose"]
+    assert plan["requires_confirmation"] is True
+
+
 def test_stable_plan_hash_ignores_top_level_plan_hash():
     plan = validate_plan(
         {

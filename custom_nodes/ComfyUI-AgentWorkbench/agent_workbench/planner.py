@@ -229,6 +229,14 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     }
 
 
+def _widget_name_hint_from_text(text: str) -> str | None:
+    lowered = text.lower()
+    for triggers, names in WIDGET_ALIASES:
+        if any(trigger in lowered or trigger in text for trigger in triggers):
+            return names[0]
+    return None
+
+
 def _extract_node_type_to_add(text: str) -> str | None:
     patterns = (
         r"(?:添加|新增|创建|加)(?:一个|一個|个)?\s*([A-Za-z][A-Za-z0-9_./:-]+)\s*(?:节点|node)",
@@ -247,9 +255,14 @@ def _plan_graph_add_node(text: str) -> dict | None:
     node_type = _extract_node_type_to_add(text)
     if not node_type:
         return None
+    payload = {"node_type": node_type}
+    value = _extract_value_after_set(text)
+    widget_name = _widget_name_hint_from_text(text)
+    if value and widget_name:
+        payload["widgets"] = {widget_name: value}
     return {
         "summary": f"Add graph node {node_type}",
-        "actions": [{"type": "graph.add_node", "payload": {"node_type": node_type}}],
+        "actions": [{"type": "graph.add_node", "payload": payload}],
     }
 
 
@@ -428,6 +441,18 @@ def _extract_ollama_model(text: str) -> str | None:
     return None
 
 
+def _plan_compose_up(text: str) -> dict | None:
+    lowered = text.lower()
+    if "compose" not in lowered:
+        return None
+    if not any(term in lowered or term in text for term in ("up -d", "apply", "应用", "生效", "重读", "重建")):
+        return None
+    return {
+        "summary": "Apply docker compose configuration",
+        "actions": [{"type": "service.compose_up", "payload": {}}],
+    }
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -452,6 +477,36 @@ class RuleBasedPlanner:
                         "payload": {
                             "command": "sudo swapoff -a",
                             "why": "Disable swap to avoid unified-memory paging and machine stalls",
+                        },
+                    }
+                ],
+            }
+        if "锁频" in text or "lgc" in lowered or (
+            "nvidia-smi" in lowered and any(term in lowered or term in text for term in ("lock", "锁"))
+        ):
+            return {
+                "summary": "Print sudo GPU clock lock command for Srain",
+                "actions": [
+                    {
+                        "type": "sudo.print_command",
+                        "payload": {
+                            "command": "sudo nvidia-smi -lgc 300,2100",
+                            "why": "Lock GPU clock to reduce current spikes on GB10",
+                        },
+                    }
+                ],
+            }
+        if "ollama" in lowered and any(term in lowered or term in text for term in ("服务", "systemctl", "彻底")) and any(
+            term in lowered or term in text for term in ("stop", "停止", "停")
+        ):
+            return {
+                "summary": "Print sudo Ollama service stop command for Srain",
+                "actions": [
+                    {
+                        "type": "sudo.print_command",
+                        "payload": {
+                            "command": "sudo systemctl stop ollama",
+                            "why": "Stop the Ollama service to fully release unified memory before heavy ComfyUI work",
                         },
                     }
                 ],
@@ -511,6 +566,9 @@ class RuleBasedPlanner:
                 "summary": f"Set compose reserve-vram to {value}",
                 "actions": [{"type": "compose.set_reserve_vram", "payload": {"value": value}}],
             }
+        compose_up_plan = _plan_compose_up(text)
+        if compose_up_plan is not None:
+            return compose_up_plan
         if "free" in lowered or "释放" in text or "腾内存" in text or "内存" in text:
             return {
                 "summary": "Free ComfyUI memory",
