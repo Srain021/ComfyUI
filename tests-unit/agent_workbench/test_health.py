@@ -100,6 +100,7 @@ def test_frontend_exposes_plan_first_operator_controls():
     assert "/agent/context" in script
     assert "/agent/plan" in script
     assert "/agent/apply" in script
+    assert "/agent/apply-deferred" in script
     assert "currentGraphSnapshot" in script
     assert "agent-workbench-confirm" in script
     assert "agent-workbench-cancel" in script
@@ -143,6 +144,8 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "executeFrontendRequest" in script
     assert "manager_request" in script
     assert "http_request" in script
+    assert "deferred_server_actions" in script
+    assert "action_index" in script
     assert 'action.type === "graph.set_widget"' in graph_actions
     assert 'action.type === "graph.add_node"' in graph_actions
     assert 'action.type === "graph.connect"' in graph_actions

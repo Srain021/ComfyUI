@@ -6,6 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
+from agent_workbench import actions as agent_actions
 from agent_workbench.actions import apply_plan, dry_run_plan
 from agent_workbench.executor import RecordingExecutor
 
@@ -111,6 +112,53 @@ def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_pa
     assert result["ok"] is True
     assert result["applied"][0]["manager_request"]["path"] == "/customnode/install/git_url"
     assert executor.manager_requests[0]["body"] == "https://example.com/node.git"
+
+
+def test_service_restart_after_manager_request_is_deferred_until_frontend_completes(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Disable node and restart",
+            "actions": [
+                {"type": "custom_node.disable", "payload": {"id": "ComfyUI-TestNode"}},
+                {
+                    "type": "service.restart_container",
+                    "payload": {"container": "comfyui-gb10"},
+                },
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"]["path"] == "/manager/queue/disable"
+    assert result["applied"][1] == {
+        "type": "service.restart_container",
+        "deferred": True,
+        "action_index": 1,
+    }
+    assert executor.commands == []
+
+    assert hasattr(agent_actions, "apply_deferred_action")
+    followup = agent_actions.apply_deferred_action(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        action_index=1,
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert followup["ok"] is True
+    assert followup["applied"]["type"] == "service.restart_container"
+    assert executor.commands[-1] == ["docker", "restart", "comfyui-gb10"]
 
 
 def test_sudo_action_is_print_only(tmp_path):

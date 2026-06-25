@@ -227,9 +227,10 @@ function createWorkbenchPanel() {
     if (lastDryRun.plan.requires_confirmation) {
       plan.confirmed = confirmCheckbox.checked;
     }
+    const approvedHash = lastDryRun.plan.plan_hash;
     const result = await postJson("/agent/apply", {
       plan,
-      approved_hash: lastDryRun.plan.plan_hash,
+      approved_hash: approvedHash,
     });
     if (result.ok) {
       try {
@@ -258,6 +259,23 @@ function createWorkbenchPanel() {
       } catch (error) {
         result.ok = false;
         result.frontend_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (result.ok) {
+      try {
+        result.deferred_server_actions = [];
+        for (const applied of result.applied || []) {
+          if (applied.deferred === true && Number.isInteger(applied.action_index)) {
+            result.deferred_server_actions.push(await postJson("/agent/apply-deferred", {
+              plan,
+              approved_hash: approvedHash,
+              action_index: applied.action_index,
+            }));
+          }
+        }
+      } catch (error) {
+        result.ok = false;
+        result.deferred_error = error instanceof Error ? error.message : String(error);
       }
     }
     renderJson(output, result);

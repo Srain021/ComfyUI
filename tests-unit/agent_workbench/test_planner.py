@@ -1682,6 +1682,33 @@ def test_rule_planner_plans_plugin_update_all():
     assert plan["actions"] == [{"type": "custom_node.update_all", "payload": {}}]
 
 
+def test_rule_planner_plans_custom_node_disable_then_restart():
+    plan = RuleBasedPlanner().plan("禁用 custom node ComfyUI-TestNode 然后重启 ComfyUI", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.disable", "payload": {"id": "ComfyUI-TestNode"}},
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
+def test_rule_planner_plans_custom_node_install_then_restart():
+    plan = RuleBasedPlanner().plan(
+        "安装 custom node https://github.com/example/ComfyUI-TestNode.git 并重启服务",
+        context={},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "custom_node.install",
+            "payload": {
+                "method": "git_url",
+                "url": "https://github.com/example/ComfyUI-TestNode.git",
+            },
+        },
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
 def test_rule_planner_prints_sudo_swapoff_instead_of_executing():
     plan = RuleBasedPlanner().plan("关 swap 防止卡死", context={})
 

@@ -1426,6 +1426,77 @@ def _plan_custom_node_manager_action(text: str) -> dict | None:
     }
 
 
+def _restart_container_action() -> dict:
+    return {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}}
+
+
+def _mentions_service_restart(text: str) -> bool:
+    lowered = text.lower()
+    return ("重启" in text or "restart" in lowered) and any(
+        term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
+    )
+
+
+def _with_restart_followup(plan: dict, text: str) -> dict:
+    if not _mentions_service_restart(text):
+        return plan
+    return {
+        "summary": f"{plan['summary']} and restart ComfyUI",
+        "actions": [*plan["actions"], _restart_container_action()],
+    }
+
+
+def _plan_custom_node_install_from_url(text: str) -> dict | None:
+    lowered = text.lower()
+    if not (_mentions_custom_node(text) and any(term in lowered or term in text for term in ("install", "安装"))):
+        return None
+    url = _extract_url(text)
+    if not url:
+        return None
+    return {
+        "summary": f"Install custom node from {url}",
+        "actions": [
+            {
+                "type": "custom_node.install",
+                "payload": {"method": "git_url", "url": url},
+            }
+        ],
+    }
+
+
+def _plan_custom_node_state_action(text: str) -> dict | None:
+    lowered = text.lower()
+    if not (_mentions_custom_node(text) or "节点" in text):
+        return None
+    action_type = None
+    if any(term in lowered or term in text for term in ("disable", "禁用")):
+        action_type = "custom_node.disable"
+    elif any(term in lowered or term in text for term in ("enable", "启用")):
+        action_type = "custom_node.enable"
+    if action_type is None:
+        return None
+    node_id = _extract_custom_node_id(text)
+    if not node_id:
+        return None
+    verb = action_type.removeprefix("custom_node.")
+    return {
+        "summary": f"{verb.title()} custom node {node_id}",
+        "actions": [{"type": action_type, "payload": {"id": node_id}}],
+    }
+
+
+def _plan_custom_node_action(text: str) -> dict | None:
+    for planner in (
+        _plan_custom_node_manager_action,
+        _plan_custom_node_install_from_url,
+        _plan_custom_node_state_action,
+    ):
+        plan = planner(text)
+        if plan is not None:
+            return _with_restart_followup(plan, text)
+    return None
+
+
 def _extract_ollama_model(text: str) -> str | None:
     match = re.search(r"(?:模型|model)\s+([A-Za-z0-9_.:/-]+)", text, re.IGNORECASE)
     if match:
@@ -1615,14 +1686,15 @@ class RuleBasedPlanner:
                     }
                 ],
             }
+        custom_node_plan = _plan_custom_node_action(text)
+        if custom_node_plan is not None:
+            return custom_node_plan
         if ("重启" in text or "restart" in lowered) and any(
             term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
         ):
             return {
                 "summary": "Restart ComfyUI container",
-                "actions": [
-                    {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}}
-                ],
+                "actions": [_restart_container_action()],
             }
         if "ollama" in lowered and any(term in lowered or term in text for term in ("stop", "停止", "驱逐")):
             model = _extract_ollama_model(text)
@@ -1631,9 +1703,6 @@ class RuleBasedPlanner:
                     "summary": f"Stop Ollama model {model}",
                     "actions": [{"type": "runtime.stop_ollama_model", "payload": {"model": model}}],
                 }
-        custom_node_manager_plan = _plan_custom_node_manager_action(text)
-        if custom_node_manager_plan is not None:
-            return custom_node_manager_plan
         if _mentions_custom_node(text) and any(
             term in lowered or term in text for term in ("install", "安装")
         ):

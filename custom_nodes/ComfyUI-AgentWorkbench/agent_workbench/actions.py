@@ -46,6 +46,27 @@ ACTION_REGISTRY = {
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
 
+FRONTEND_MEDIATED_ACTIONS = {
+    "runtime.queue_prompt",
+    "runtime.clear_queue",
+    "runtime.interrupt",
+    "runtime.free_memory",
+    "custom_node.install",
+    "custom_node.disable",
+    "custom_node.enable",
+    "custom_node.update",
+    "custom_node.update_all",
+    "custom_node.reinstall",
+    "custom_node.fix",
+}
+SERVER_DEFERABLE_ACTIONS = {
+    "workflow.save",
+    "compose.set_reserve_vram",
+    "service.compose_up",
+    "service.restart_container",
+    "runtime.stop_ollama_model",
+}
+
 
 def _normalize_action(action: object, index: int) -> dict:
     if not isinstance(action, dict):
@@ -178,6 +199,15 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
     raise PlanValidationError(f"No dispatcher for action type: {action_type}")
 
 
+def _is_frontend_mediated_action(action: dict) -> bool:
+    action_type = action["type"]
+    return action_type.startswith("graph.") or action_type in FRONTEND_MEDIATED_ACTIONS
+
+
+def _deferred_action(action: dict, index: int) -> dict:
+    return {"type": action["type"], "deferred": True, "action_index": index}
+
+
 def apply_plan(raw_plan: dict, approved_hash: str, root: Path | None = None, executor=None) -> dict:
     root = root or Path.cwd()
     executor = executor or DefaultExecutor()
@@ -189,7 +219,45 @@ def apply_plan(raw_plan: dict, approved_hash: str, root: Path | None = None, exe
     if plan.get("requires_confirmation") and not confirmed:
         return {"ok": False, "error": "confirmation_required"}
     try:
-        applied = [_dispatch_action(action, root, executor) for action in plan["actions"]]
+        applied = []
+        frontend_barrier_seen = False
+        for index, action in enumerate(plan["actions"]):
+            if frontend_barrier_seen and action["type"] in SERVER_DEFERABLE_ACTIONS:
+                applied.append(_deferred_action(action, index))
+                continue
+            applied.append(_dispatch_action(action, root, executor))
+            if _is_frontend_mediated_action(action):
+                frontend_barrier_seen = True
+    except (OSError, ValueError) as exc:
+        raise PlanValidationError(str(exc)) from exc
+    return {"ok": True, "status": "applied", "applied": applied}
+
+
+def apply_deferred_action(
+    raw_plan: dict,
+    approved_hash: str,
+    action_index: int,
+    root: Path | None = None,
+    executor=None,
+) -> dict:
+    root = root or Path.cwd()
+    executor = executor or DefaultExecutor()
+    confirmed = isinstance(raw_plan, dict) and raw_plan.get("confirmed") is True
+    plan = validate_plan(raw_plan)
+    expected_hash = stable_plan_hash(plan)
+    if approved_hash != expected_hash:
+        return {"ok": False, "error": "approved_hash_mismatch", "expected_hash": expected_hash}
+    if plan.get("requires_confirmation") and not confirmed:
+        return {"ok": False, "error": "confirmation_required"}
+    if not isinstance(action_index, int) or action_index < 0 or action_index >= len(plan["actions"]):
+        return {"ok": False, "error": "invalid_deferred_action_index"}
+    action = plan["actions"][action_index]
+    if action["type"] not in SERVER_DEFERABLE_ACTIONS:
+        return {"ok": False, "error": "action_is_not_deferable"}
+    if not any(_is_frontend_mediated_action(item) for item in plan["actions"][:action_index]):
+        return {"ok": False, "error": "deferred_action_has_no_frontend_prerequisite"}
+    try:
+        applied = _dispatch_action(action, root, executor)
     except (OSError, ValueError) as exc:
         raise PlanValidationError(str(exc)) from exc
     return {"ok": True, "status": "applied", "applied": applied}

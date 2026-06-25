@@ -315,6 +315,53 @@ def test_register_routes_adds_dry_run_and_apply_routes():
         agent_routes._REGISTERED = False
 
 
+def test_register_routes_adds_apply_deferred_route(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_apply_deferred_action(plan, approved_hash, action_index, root):
+        calls.append(
+            {
+                "plan": plan,
+                "approved_hash": approved_hash,
+                "action_index": action_index,
+                "root": root,
+            }
+        )
+        return {"ok": True, "status": "applied", "applied": {"type": "service.restart_container"}}
+
+    monkeypatch.setattr(agent_routes, "apply_deferred_action", fake_apply_deferred_action)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/apply-deferred")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "plan": {"summary": "restart", "actions": []},
+                        "approved_hash": "hash",
+                        "action_index": 1,
+                    }
+                )
+            )
+        )
+
+        assert json.loads(response.text)["ok"] is True
+        assert calls[0]["approved_hash"] == "hash"
+        assert calls[0]["action_index"] == 1
+    finally:
+        agent_routes._REGISTERED = False
+
+
 def test_register_routes_adds_agent_plan_route():
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
