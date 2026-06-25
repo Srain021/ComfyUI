@@ -28,6 +28,21 @@ def _bounded_graph_input(graph: object) -> dict:
     }
 
 
+def _graph_from_body(body: dict) -> object:
+    graph = body.get("graph")
+    if isinstance(graph, dict):
+        return graph
+    context = body.get("context")
+    if isinstance(context, dict):
+        graph_input = context.get("graph_input")
+        if isinstance(graph_input, dict):
+            return graph_input
+        context_graph = context.get("graph")
+        if isinstance(context_graph, dict):
+            return context_graph
+    return graph
+
+
 async def _json_request(request) -> dict:
     if not getattr(request, "can_read_body", False):
         return {}
@@ -59,7 +74,7 @@ def register_routes(prompt_server=None) -> None:
     @routes.post("/agent/context")
     async def agent_context(request):
         body = await _json_request(request)
-        graph = body.get("graph")
+        graph = _graph_from_body(body)
         context = collect_context(Path.cwd(), graph=graph)
         return web.json_response(context)
 
@@ -67,7 +82,7 @@ def register_routes(prompt_server=None) -> None:
     async def agent_plan(request):
         body = await _json_request(request)
         message = body.get("message", "")
-        graph = body.get("graph")
+        graph = _graph_from_body(body)
         context = collect_context(Path.cwd(), graph=graph)
         context["graph_input"] = _bounded_graph_input(graph)
         raw_plan = default_planner().plan(message, context=context)

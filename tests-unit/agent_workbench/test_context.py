@@ -390,3 +390,56 @@ def test_agent_plan_route_passes_graph_snapshot_to_planner():
         assert payload["plan"]["requires_confirmation"] is False
     finally:
         agent_routes._REGISTERED = False
+
+
+def test_agent_plan_route_accepts_context_graph_input_for_agent_callers():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/plan")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "把 KSampler 的重绘幅度改成 0.55",
+                        "context": {
+                            "graph_input": {
+                                "nodes": [
+                                    {
+                                        "id": 9,
+                                        "type": "KSampler",
+                                        "title": "KSampler",
+                                        "widgets": [
+                                            {"name": "steps", "value": 20},
+                                            {"name": "cfg", "value": 7.0},
+                                            {"name": "denoise", "value": 1.0},
+                                        ],
+                                    }
+                                ],
+                                "links": [],
+                            }
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"][0]["type"] == "graph.set_widget"
+        assert payload["plan"]["actions"][0]["payload"] == {
+            "node_id": 9,
+            "widget": "denoise",
+            "value": 0.55,
+        }
+    finally:
+        agent_routes._REGISTERED = False
