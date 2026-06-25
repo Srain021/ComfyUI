@@ -49,6 +49,63 @@ def test_rule_planner_sets_selected_prompt_widget_from_natural_language():
     ]
 
 
+def test_rule_planner_sets_selected_prompt_content_with_write_synonym():
+    plan = RuleBasedPlanner().plan(
+        "把这个 prompt 节点的内容写成 neon skyline",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "neon skyline"},
+        }
+    ]
+
+
+def test_rule_planner_fills_positive_prompt_with_natural_language():
+    plan = RuleBasedPlanner().plan(
+        "给正向提示词填上 warm daylight",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 7, "widget": "text", "value": "warm daylight"},
+        }
+    ]
+
+
 def test_rule_planner_sets_widget_by_node_id():
     plan = RuleBasedPlanner().plan(
         "把 12 号节点的 prompt 改成 hello world",
@@ -774,6 +831,46 @@ def test_rule_planner_moves_node_right_by_delta():
 
     assert plan["actions"] == [
         {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [310, 20]}}
+    ]
+
+
+def test_rule_planner_moves_selected_nodes_by_delta():
+    plan = RuleBasedPlanner().plan(
+        "把选中的节点往右移动 100",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "selected": True, "pos": [0, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "selected": True, "pos": [10, 20]},
+                    {"id": 10, "type": "VAELoader", "title": "VAE", "selected": False, "pos": [50, 60]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 7, "pos": [100, 0]}},
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [110, 20]}},
+    ]
+
+
+def test_rule_planner_moves_all_matching_nodes_by_delta():
+    plan = RuleBasedPlanner().plan(
+        "把所有 KSampler 往下移动 80",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 7, "type": "CLIPTextEncode", "title": "Prompt", "pos": [0, 0]},
+                    {"id": 9, "type": "KSampler", "title": "KSampler", "pos": [10, 20]},
+                    {"id": 10, "type": "KSampler", "title": "Refiner KSampler", "pos": [50, 60]},
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_position", "payload": {"node_id": 9, "pos": [10, 100]}},
+        {"type": "graph.set_position", "payload": {"node_id": 10, "pos": [50, 140]}},
     ]
 
 

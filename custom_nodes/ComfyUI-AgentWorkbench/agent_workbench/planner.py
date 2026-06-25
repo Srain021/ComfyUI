@@ -21,11 +21,33 @@ def _strip_value(value: str) -> str:
     return cleaned
 
 
+VALUE_SET_DELIMITERS = (
+    "替换为",
+    "改成",
+    "改为",
+    "设置为",
+    "设为",
+    "变成",
+    "写成",
+    "写为",
+    "换成",
+    "换为",
+    "填成",
+    "填为",
+    "填上",
+    "输入为",
+)
+
+
 def _extract_value_after_set(text: str) -> str | None:
-    for delimiter in ("改成", "改为", "设置为", "设为", "变成"):
+    for delimiter in VALUE_SET_DELIMITERS:
         if delimiter in text:
             return _strip_value(text.rsplit(delimiter, 1)[1])
-    match = re.search(r"\b(?:set|change|update)\b.+?\b(?:to|as)\b\s*(.+)$", text, re.IGNORECASE)
+    match = re.search(
+        r"\b(?:set|change|update|write|replace|fill)\b.+?\b(?:to|as|with)\b\s*(.+)$",
+        text,
+        re.IGNORECASE,
+    )
     if match:
         return _strip_value(match.group(1))
     return None
@@ -261,7 +283,7 @@ def _select_bulk_nodes(nodes: list[dict], text: str) -> list[dict]:
 WIDGET_ALIASES = (
     (("negative", "负面", "反向"), ("negative", "negative_prompt", "neg_prompt", "text")),
     (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
-    (("prompt", "提示词", "文本", "text"), ("text", "prompt", "prompt_text", "positive")),
+    (("prompt", "提示词", "文本", "内容", "text"), ("text", "prompt", "prompt_text", "positive")),
     (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
     (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),
     (("lora 权重", "lora强度", "权重", "强度", "strength"), ("strength_model", "strength", "weight")),
@@ -332,8 +354,9 @@ def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     if not hints:
         return []
     hint_pattern = "|".join(re.escape(hint) for hint in sorted(hints, key=len, reverse=True))
+    assignment_operators = "|".join(re.escape(operator) for operator in (*VALUE_SET_DELIMITERS, "="))
     pattern = re.compile(
-        rf"(?P<hint>{hint_pattern})\s*(?:改成|改为|设置为|设为|变成|=)\s*",
+        rf"(?P<hint>{hint_pattern})\s*(?:{assignment_operators})\s*",
         re.IGNORECASE,
     )
     matches = list(pattern.finditer(text))
@@ -636,6 +659,26 @@ def _plan_graph_set_position(text: str, context: dict) -> dict | None:
     if not any(term in lowered or term in text for term in ("移动", "移到", "挪", "move")):
         return None
     nodes = _graph_nodes(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text)
+    if bulk_nodes:
+        delta = _extract_move_delta(text)
+        if delta is not None:
+            actions = []
+            for node in bulk_nodes:
+                current = _node_position(node)
+                actions.append(
+                    {
+                        "type": "graph.set_position",
+                        "payload": {
+                            "node_id": node.get("id"),
+                            "pos": [current[0] + delta[0], current[1] + delta[1]],
+                        },
+                    }
+                )
+            return {
+                "summary": f"Move {len(bulk_nodes)} graph node(s)",
+                "actions": actions,
+            }
     node = _select_node(nodes, text)
     if node is None:
         return None
