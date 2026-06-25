@@ -167,6 +167,10 @@ NODE_LABEL_ALIASES = (
         ("checkpointloader", "checkpointloadersimple", "load checkpoint", "checkpoint"),
     ),
     (
+        ("vae",),
+        ("vaeloader", "load vae", "vae loader"),
+    ),
+    (
         ("clip skip", "clip layer", "clip 层", "clip跳层"),
         ("clipsetlastlayer", "clip set last layer"),
     ),

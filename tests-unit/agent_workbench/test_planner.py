@@ -773,6 +773,41 @@ def test_rule_planner_sets_checkpoint_model_by_semantic_alias():
     ]
 
 
+def test_rule_planner_sets_vae_model_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 VAE 换成 vae-ft-mse.safetensors",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 33,
+                        "type": "VAELoader",
+                        "title": "Load VAE",
+                        "widgets": [{"name": "vae_name", "value": "old.vae.safetensors"}],
+                    },
+                    {
+                        "id": 34,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 33,
+                "widget": "vae_name",
+                "value": "vae-ft-mse.safetensors",
+            },
+        }
+    ]
+
+
 def test_rule_planner_sets_denoise_widget_by_chinese_alias():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的重绘幅度改成 0.55",
