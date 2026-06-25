@@ -38,6 +38,9 @@ VALUE_SET_DELIMITERS = (
     "输入为",
 )
 
+TEXT_APPEND_DELIMITERS = ("加上", "追加", "补上", "加入")
+TEXT_REMOVE_DELIMITERS = ("去掉", "去除", "删除", "删掉", "移除")
+
 
 def _extract_value_after_set(text: str) -> str | None:
     for delimiter in VALUE_SET_DELIMITERS:
@@ -50,6 +53,14 @@ def _extract_value_after_set(text: str) -> str | None:
     )
     if match:
         return _strip_value(match.group(1))
+    return None
+
+
+def _extract_value_after_delimiters(text: str, delimiters: tuple[str, ...]) -> str | None:
+    for delimiter in delimiters:
+        if delimiter in text:
+            value = _strip_value(text.rsplit(delimiter, 1)[1])
+            return value or None
     return None
 
 
@@ -426,7 +437,73 @@ def _adjust_widget_value(widget: dict, delta: int | float) -> object | None:
     return value
 
 
+def _append_text_value(current: object, fragment: str) -> str | None:
+    if not isinstance(current, str):
+        return None
+    cleaned = _strip_value(fragment)
+    if not cleaned:
+        return None
+    base = current.strip()
+    if not base:
+        return cleaned
+    separator = " " if base.endswith((",", "，", ";", "；")) else ", "
+    return f"{base}{separator}{cleaned}"
+
+
+def _remove_text_value(current: object, fragment: str) -> str | None:
+    if not isinstance(current, str):
+        return None
+    cleaned = _strip_value(fragment)
+    if not cleaned:
+        return None
+    parts = [part.strip() for part in re.split(r"\s*[,，]\s*", current) if part.strip()]
+    lowered = cleaned.lower()
+    remaining = [part for part in parts if part.lower() != lowered]
+    if len(remaining) != len(parts):
+        return ", ".join(remaining)
+    value = re.sub(re.escape(cleaned), "", current, flags=re.IGNORECASE)
+    value = re.sub(r"\s*[,，]\s*[,，]+\s*", ", ", value)
+    return value.strip(" \t\r\n,，")
+
+
+def _text_edit_actions_for_node(text: str, node: dict) -> list[dict]:
+    append_value = _extract_value_after_delimiters(text, TEXT_APPEND_DELIMITERS)
+    remove_value = _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS)
+    if not append_value and not remove_value:
+        return []
+    widget = _select_widget(node, text)
+    if widget is None:
+        return []
+    if append_value:
+        value = _append_text_value(widget.get("value"), append_value)
+    else:
+        value = _remove_text_value(widget.get("value"), remove_value or "")
+    if value is None:
+        return []
+    return [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": node.get("id"),
+                "widget": widget["name"],
+                "value": value,
+            },
+        }
+    ]
+
+
+def _looks_like_widget_text_removal(text: str) -> bool:
+    if not _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS):
+        return False
+    lowered = text.lower()
+    return any(term in lowered or term in text for term in ("从", "里", "里面", "文本", "内容", "提示词", "prompt", "text"))
+
+
 def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
+    text_actions = _text_edit_actions_for_node(text, node)
+    if text_actions:
+        return text_actions
+
     size_assignments = _size_assignments(text, node)
     if size_assignments:
         assignments = size_assignments
@@ -510,6 +587,8 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
 def _plan_graph_delete_node(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("删除", "删掉", "移除", "delete", "remove")):
+        return None
+    if _looks_like_widget_text_removal(text):
         return None
     nodes = _graph_nodes(context)
     bulk_nodes = _select_bulk_nodes(nodes, text)

@@ -243,6 +243,105 @@ def test_rule_planner_sets_negative_prompt_by_semantic_alias():
     ]
 
 
+def test_rule_planner_appends_text_to_positive_prompt():
+    plan = RuleBasedPlanner().plan(
+        "给正向提示词加上 cinematic lighting",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "portrait, shallow depth of field"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 7,
+                "widget": "text",
+                "value": "portrait, shallow depth of field, cinematic lighting",
+            },
+        }
+    ]
+
+
+def test_rule_planner_removes_text_from_negative_prompt():
+    plan = RuleBasedPlanner().plan(
+        "从负面提示词里去掉 blurry",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "portrait"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "blurry, low quality, watermark"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 8,
+                "widget": "text",
+                "value": "low quality, watermark",
+            },
+        }
+    ]
+
+
+def test_rule_planner_prefers_prompt_text_removal_over_node_delete():
+    plan = RuleBasedPlanner().plan(
+        "从负面提示词里删除 blurry",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "blurry, low quality"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": 8,
+                "widget": "text",
+                "value": "low quality",
+            },
+        }
+    ]
+
+
 def test_rule_planner_coerces_numeric_widget_values():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 改成 28",
