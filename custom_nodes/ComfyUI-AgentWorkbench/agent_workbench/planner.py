@@ -40,6 +40,7 @@ VALUE_SET_DELIMITERS = (
 
 TEXT_APPEND_DELIMITERS = ("加上", "追加", "补上", "加入")
 TEXT_REMOVE_DELIMITERS = ("去掉", "去除", "删除", "删掉", "移除")
+TEXT_CLEAR_TERMS = ("清空", "清除", "清掉", "clear", "empty")
 
 
 def _extract_value_after_set(text: str) -> str | None:
@@ -466,7 +467,39 @@ def _remove_text_value(current: object, fragment: str) -> str | None:
     return value.strip(" \t\r\n,，")
 
 
+def _looks_like_text_clear(text: str) -> bool:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in TEXT_CLEAR_TERMS):
+        return False
+    return any(
+        term in lowered or term in text
+        for term in ("prompt", "提示词", "文本", "内容", "text")
+    )
+
+
+def _clear_text_actions_for_node(text: str, node: dict) -> list[dict]:
+    if not _looks_like_text_clear(text):
+        return []
+    widget = _select_widget(node, text)
+    if widget is None or not isinstance(widget.get("value"), str):
+        return []
+    return [
+        {
+            "type": "graph.set_widget",
+            "payload": {
+                "node_id": node.get("id"),
+                "widget": widget["name"],
+                "value": "",
+            },
+        }
+    ]
+
+
 def _text_edit_actions_for_node(text: str, node: dict) -> list[dict]:
+    clear_actions = _clear_text_actions_for_node(text, node)
+    if clear_actions:
+        return clear_actions
+
     append_value = _extract_value_after_delimiters(text, TEXT_APPEND_DELIMITERS)
     remove_value = _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS)
     if not append_value and not remove_value:

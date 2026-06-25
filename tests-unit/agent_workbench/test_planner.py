@@ -342,6 +342,84 @@ def test_rule_planner_prefers_prompt_text_removal_over_node_delete():
     ]
 
 
+def test_rule_planner_clears_selected_prompt_text():
+    plan = RuleBasedPlanner().plan(
+        "清空这个 prompt 节点的文本",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old prompt"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": ""},
+        }
+    ]
+
+
+def test_rule_planner_clears_negative_prompt_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "清空负面提示词",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "Positive Prompt",
+                        "widgets": [{"name": "text", "value": "portrait"}],
+                    },
+                    {
+                        "id": 8,
+                        "type": "CLIPTextEncode",
+                        "title": "Negative Prompt",
+                        "widgets": [{"name": "text", "value": "blurry, low quality"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 8, "widget": "text", "value": ""},
+        }
+    ]
+
+
+def test_rule_planner_clear_queue_does_not_clear_selected_prompt():
+    plan = RuleBasedPlanner().plan(
+        "清空待执行队列",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old prompt"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [{"type": "runtime.clear_queue", "payload": {}}]
+
+
 def test_rule_planner_coerces_numeric_widget_values():
     plan = RuleBasedPlanner().plan(
         "把 KSampler 的 steps 改成 28",
