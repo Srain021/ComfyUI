@@ -1519,6 +1519,40 @@ def _plan_compose_up(text: str) -> dict | None:
     }
 
 
+def _extract_command_flag(text: str) -> str | None:
+    match = re.search(r"--[A-Za-z0-9][A-Za-z0-9-]*", text)
+    return match.group(0) if match else None
+
+
+def _plan_compose_command_flag(text: str) -> dict | None:
+    flag = _extract_command_flag(text)
+    if not flag:
+        return None
+    lowered = text.lower()
+    if not any(
+        term in lowered or term in text
+        for term in ("compose", "comfyui", "command", "flag", "启动参数", "参数")
+    ):
+        return None
+    enabled = None
+    if any(term in lowered or term in text for term in ("启用", "开启", "打开", "添加", "加上", "enable", "add")):
+        enabled = True
+    if any(
+        term in lowered or term in text
+        for term in ("禁用", "关闭", "移除", "删除", "去掉", "disable", "remove", "delete")
+    ):
+        enabled = False
+    if enabled is None:
+        return None
+    verb = "Enable" if enabled else "Disable"
+    return {
+        "summary": f"{verb} compose command flag {flag}",
+        "actions": [
+            {"type": "compose.set_command_flag", "payload": {"flag": flag, "enabled": enabled}}
+        ],
+    }
+
+
 def _plan_runtime_queue_prompt(text: str) -> dict | None:
     lowered = text.lower()
     if not any(
@@ -1742,6 +1776,9 @@ class RuleBasedPlanner:
                 "summary": f"Set compose reserve-vram to {value}",
                 "actions": [{"type": "compose.set_reserve_vram", "payload": {"value": value}}],
             }
+        compose_flag_plan = _plan_compose_command_flag(text)
+        if compose_flag_plan is not None:
+            return compose_flag_plan
         compose_up_plan = _plan_compose_up(text)
         if compose_up_plan is not None:
             return compose_up_plan

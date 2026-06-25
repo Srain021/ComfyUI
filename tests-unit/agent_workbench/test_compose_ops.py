@@ -9,8 +9,11 @@ AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
 from agent_workbench.ops.compose import (
+    apply_command_flag,
     apply_reserve_vram,
+    patch_command_flag,
     patch_reserve_vram,
+    plan_command_flag,
     plan_reserve_vram,
     validate_compose_text,
 )
@@ -67,3 +70,54 @@ def test_apply_reserve_vram_snapshots_before_write(tmp_path):
     assert Path(result["snapshot"]).read_text(encoding="utf-8") == COMPOSE_TEXT
     assert "- \"9\"  # keep this comment" in compose_path.read_text(encoding="utf-8")
     assert result["value"] == "9"
+
+
+def test_patch_command_flag_adds_and_removes_boolean_flag():
+    enabled = patch_command_flag(COMPOSE_TEXT, "--bf16-vae", enabled=True)
+
+    assert "- --bf16-vae" in enabled
+    assert enabled.index("- --reserve-vram") < enabled.index("- --bf16-vae")
+
+    disabled = patch_command_flag(enabled, "--bf16-vae", enabled=False)
+
+    assert disabled == COMPOSE_TEXT
+
+
+def test_patch_command_flag_targets_comfyui_service_command():
+    text = (
+        "services:\n"
+        "  helper:\n"
+        "    command:\n"
+        "      - helper.py\n"
+        "  comfyui-gb10:\n"
+        "    command:\n"
+        "      - main.py\n"
+    )
+
+    patched = patch_command_flag(text, "--bf16-vae", enabled=True)
+
+    assert "helper.py\n      - --bf16-vae" not in patched
+    assert "main.py\n      - --bf16-vae" in patched
+
+
+def test_patch_command_flag_rejects_bad_or_required_flags():
+    with pytest.raises(ValueError, match="command flag must start"):
+        patch_command_flag(COMPOSE_TEXT, "bf16-vae", enabled=True)
+    with pytest.raises(ValueError, match="required GB10 flag"):
+        patch_command_flag(COMPOSE_TEXT, "--reserve-vram", enabled=False)
+
+
+def test_plan_and_apply_command_flag_report_diff_and_snapshot(tmp_path):
+    compose_path = tmp_path / "docker-compose.yml"
+    backup_dir = tmp_path / "backups"
+    compose_path.write_text(COMPOSE_TEXT, encoding="utf-8")
+
+    plan = plan_command_flag(compose_path, "--bf16-vae", enabled=True)
+    result = apply_command_flag(compose_path, "--bf16-vae", True, backup_dir)
+
+    assert plan["changed"] is True
+    assert "- --bf16-vae" in plan["after"]
+    assert Path(result["snapshot"]).read_text(encoding="utf-8") == COMPOSE_TEXT
+    assert "- --bf16-vae" in compose_path.read_text(encoding="utf-8")
+    assert result["flag"] == "--bf16-vae"
+    assert result["enabled"] is True

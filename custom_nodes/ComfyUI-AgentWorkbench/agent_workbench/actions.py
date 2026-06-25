@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from .executor import DefaultExecutor
-from .ops.compose import DEFAULT_COMPOSE_PATH, apply_reserve_vram
+from .ops.compose import DEFAULT_COMPOSE_PATH, apply_command_flag, apply_reserve_vram
 from .ops.manager import manager_request_for_action
 from .ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
 from .permissions import max_risk, requires_confirmation
@@ -41,6 +41,7 @@ ACTION_REGISTRY = {
     "custom_node.reinstall": ("custom_node.manage", "package"),
     "custom_node.fix": ("custom_node.manage", "package"),
     "compose.set_reserve_vram": ("service.compose", "service"),
+    "compose.set_command_flag": ("service.compose", "service"),
     "service.compose_up": ("service.compose", "service"),
     "service.restart_container": ("service.restart", "service"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
@@ -62,6 +63,7 @@ FRONTEND_MEDIATED_ACTIONS = {
 SERVER_DEFERABLE_ACTIONS = {
     "workflow.save",
     "compose.set_reserve_vram",
+    "compose.set_command_flag",
     "service.compose_up",
     "service.restart_container",
     "runtime.stop_ollama_model",
@@ -168,6 +170,15 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
         value = str(_required_payload(payload, "value", action_type))
         compose_path = root / DEFAULT_COMPOSE_PATH
         result = apply_reserve_vram(compose_path, value, _agent_backup_dir(root))
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "compose.set_command_flag":
+        flag = str(_required_payload(payload, "flag", action_type))
+        enabled = _required_payload(payload, "enabled", action_type) is True
+        compose_path = root / DEFAULT_COMPOSE_PATH
+        result = apply_command_flag(compose_path, flag, enabled, _agent_backup_dir(root))
         command_result = executor.run_command(
             ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
         )

@@ -1592,6 +1592,24 @@ def test_rule_planner_plans_compose_up_to_apply_config():
     assert plan["actions"] == [{"type": "service.compose_up", "payload": {}}]
 
 
+def test_rule_planner_plans_compose_command_flag_enable_and_disable():
+    enable_plan = RuleBasedPlanner().plan("给 ComfyUI 启用 compose flag --bf16-vae 并应用配置", context={})
+    disable_plan = RuleBasedPlanner().plan("从 compose 里移除 --bf16-vae 并应用配置", context={})
+
+    assert enable_plan["actions"] == [
+        {
+            "type": "compose.set_command_flag",
+            "payload": {"flag": "--bf16-vae", "enabled": True},
+        }
+    ]
+    assert disable_plan["actions"] == [
+        {
+            "type": "compose.set_command_flag",
+            "payload": {"flag": "--bf16-vae", "enabled": False},
+        }
+    ]
+
+
 def test_rule_planner_plans_custom_node_install_from_git_url():
     plan = RuleBasedPlanner().plan(
         "安装 custom node https://github.com/example/ComfyUI-TestNode.git",

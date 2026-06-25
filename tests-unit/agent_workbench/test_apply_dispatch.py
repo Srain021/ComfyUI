@@ -56,6 +56,45 @@ def test_apply_dispatches_confirmed_compose_change(tmp_path):
     ]
 
 
+def test_apply_dispatches_confirmed_compose_command_flag_change(tmp_path):
+    compose_path = tmp_path / "dgx_spark_ltx_setup" / "docker-compose.yml"
+    compose_path.parent.mkdir(parents=True)
+    compose_path.write_text(COMPOSE_TEXT, encoding="utf-8")
+    dry_run = dry_run_plan(
+        {
+            "summary": "Enable bf16 vae",
+            "actions": [
+                {
+                    "type": "compose.set_command_flag",
+                    "payload": {"flag": "--bf16-vae", "enabled": True},
+                }
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "compose.set_command_flag"
+    assert "- --bf16-vae" in compose_path.read_text(encoding="utf-8")
+    assert executor.commands[-1] == [
+        "docker",
+        "compose",
+        "-f",
+        "dgx_spark_ltx_setup/docker-compose.yml",
+        "up",
+        "-d",
+    ]
+
+
 def test_apply_dispatches_confirmed_compose_up(tmp_path):
     dry_run = dry_run_plan(
         {
