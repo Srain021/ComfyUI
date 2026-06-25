@@ -981,6 +981,56 @@ def test_rule_planner_sets_selected_sampler_cfg_with_set_to_synonym():
     ]
 
 
+def test_rule_planner_sets_sampler_cfg_by_guidance_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的引导系数改成 6.5",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "cfg", "value": 7.0},
+                            {"name": "sampler_name", "value": "euler"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 6.5}}
+    ]
+
+
+def test_rule_planner_sets_sampler_cfg_by_prompt_relevance_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的提示词相关度改成 6.5",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "cfg", "value": 7.0},
+                            {"name": "sampler_name", "value": "euler"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "cfg", "value": 6.5}}
+    ]
+
+
 def test_rule_planner_sets_sampler_name_by_chinese_semantic_alias():
     plan = RuleBasedPlanner().plan(
         "把采样器改成 euler",

@@ -553,7 +553,10 @@ WIDGET_ALIASES = (
     (("vae",), ("vae_name", "vae")),
     (("seed", "种子"), ("seed", "noise_seed")),
     (("steps", "步数"), ("steps",)),
-    (("cfg",), ("cfg", "cfg_scale")),
+    (
+        ("cfg", "guidance", "guidance scale", "引导系数", "引导强度", "提示词相关度", "提示词引导"),
+        ("cfg", "cfg_scale"),
+    ),
     (("sampler", "采样器"), ("sampler_name", "sampler")),
     (("scheduler", "调度器"), ("scheduler",)),
     (("denoise", "重绘幅度", "降噪", "去噪"), ("denoise",)),
