@@ -33,6 +33,24 @@ test("control state requires confirmation before elevated apply", () => {
   });
 });
 
+test("control state disables apply while an apply request is in flight", () => {
+  const dryRun = {
+    plan: {
+      summary: "Edit prompt",
+      actions: [{ type: "graph.set_widget", payload: { node_id: 7 } }],
+      requires_confirmation: false,
+      plan_hash: "canvas123",
+    },
+  };
+
+  assert.deepEqual(controlStateForDryRun(dryRun, false, true), {
+    needsConfirmation: false,
+    confirmHidden: true,
+    cancelHidden: false,
+    applyDisabled: true,
+  });
+});
+
 test("control state allows canvas apply and cancel without elevated confirmation", () => {
   const dryRun = {
     plan: {

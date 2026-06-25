@@ -197,9 +197,10 @@ function createWorkbenchPanel() {
   const confirmCheckbox = panel.querySelector("#agent-workbench-confirm");
   const cancelButton = panel.querySelector("#agent-workbench-cancel");
   let lastDryRun = null;
+  let applyInFlight = false;
 
   function refreshApplyState() {
-    const state = controlStateForDryRun(lastDryRun, confirmCheckbox.checked);
+    const state = controlStateForDryRun(lastDryRun, confirmCheckbox.checked, applyInFlight);
     confirmRow.hidden = state.confirmHidden;
     cancelButton.hidden = state.cancelHidden;
     applyButton.disabled = state.applyDisabled;
@@ -235,72 +236,86 @@ function createWorkbenchPanel() {
   });
 
   applyButton.addEventListener("click", async () => {
+    if (applyInFlight) {
+      return;
+    }
     if (!lastDryRun?.plan) {
       return;
     }
-    const applyRequest = buildApplyRequest(
-      lastDryRun,
-      confirmCheckbox.checked,
-      currentWorkflowSnapshot(),
-    );
-    const plan = applyRequest.plan;
-    const approvedHash = applyRequest.approved_hash;
-    const result = await postJson("/agent/apply", applyRequest);
-    if (result.ok) {
-      try {
-        result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
-        result.browser_runtime = await executeBrowserRuntimeActions(lastDryRun.plan.actions);
-      } catch (error) {
-        result.ok = false;
-        result.browser_error = error instanceof Error ? error.message : String(error);
-      }
-    }
-    if (result.ok) {
-      try {
-        result.frontend_requests = [];
-        for (const applied of result.applied || []) {
-          if (applied.manager_request) {
-            result.frontend_requests.push(await executeFrontendRequest(applied.manager_request));
-          }
-          if (applied.http_request) {
-            result.frontend_requests.push(await executeFrontendRequest({
-              method: "POST",
-              path: applied.http_request.path,
-              json: applied.http_request.json,
-            }));
-          }
-        }
-      } catch (error) {
-        result.ok = false;
-        result.frontend_error = error instanceof Error ? error.message : String(error);
-      }
-    }
-    if (result.ok) {
-      try {
-        result.deferred_server_actions = [];
-        for (const applied of result.applied || []) {
-          if (applied.deferred === true && Number.isInteger(applied.action_index)) {
-            const deferredRequest = {
-              plan,
-              approved_hash: approvedHash,
-              action_index: applied.action_index,
-            };
-            if (planNeedsBrowserWorkflow(plan)) {
-              deferredRequest.browser_workflow = currentWorkflowSnapshot();
-            }
-            result.deferred_server_actions.push(await postJson("/agent/apply-deferred", deferredRequest));
-          }
-        }
-      } catch (error) {
-        result.ok = false;
-        result.deferred_error = error instanceof Error ? error.message : String(error);
-      }
-    }
-    const completion = applyCompletionState(result, lastDryRun, confirmCheckbox.checked);
-    lastDryRun = completion.lastDryRun;
-    confirmCheckbox.checked = completion.confirmChecked;
+    applyInFlight = true;
     refreshApplyState();
-    renderJson(output, result);
+    try {
+      const applyRequest = buildApplyRequest(
+        lastDryRun,
+        confirmCheckbox.checked,
+        currentWorkflowSnapshot(),
+      );
+      const plan = applyRequest.plan;
+      const approvedHash = applyRequest.approved_hash;
+      const result = await postJson("/agent/apply", applyRequest);
+      if (result.ok) {
+        try {
+          result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
+          result.browser_runtime = await executeBrowserRuntimeActions(lastDryRun.plan.actions);
+        } catch (error) {
+          result.ok = false;
+          result.browser_error = error instanceof Error ? error.message : String(error);
+        }
+      }
+      if (result.ok) {
+        try {
+          result.frontend_requests = [];
+          for (const applied of result.applied || []) {
+            if (applied.manager_request) {
+              result.frontend_requests.push(await executeFrontendRequest(applied.manager_request));
+            }
+            if (applied.http_request) {
+              result.frontend_requests.push(await executeFrontendRequest({
+                method: "POST",
+                path: applied.http_request.path,
+                json: applied.http_request.json,
+              }));
+            }
+          }
+        } catch (error) {
+          result.ok = false;
+          result.frontend_error = error instanceof Error ? error.message : String(error);
+        }
+      }
+      if (result.ok) {
+        try {
+          result.deferred_server_actions = [];
+          for (const applied of result.applied || []) {
+            if (applied.deferred === true && Number.isInteger(applied.action_index)) {
+              const deferredRequest = {
+                plan,
+                approved_hash: approvedHash,
+                action_index: applied.action_index,
+              };
+              if (planNeedsBrowserWorkflow(plan)) {
+                deferredRequest.browser_workflow = currentWorkflowSnapshot();
+              }
+              result.deferred_server_actions.push(await postJson("/agent/apply-deferred", deferredRequest));
+            }
+          }
+        } catch (error) {
+          result.ok = false;
+          result.deferred_error = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const completion = applyCompletionState(result, lastDryRun, confirmCheckbox.checked);
+      lastDryRun = completion.lastDryRun;
+      confirmCheckbox.checked = completion.confirmChecked;
+      renderJson(output, result);
+    } catch (error) {
+      renderJson(output, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      applyInFlight = false;
+      refreshApplyState();
+    }
   });
 }
 

@@ -179,3 +179,22 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "node.pos =" in graph_actions
     assert "globalThis.LiteGraph.BYPASS" in graph_actions
     assert "app.graph.setDirtyCanvas(true, true)" in graph_actions
+
+
+def test_frontend_disables_apply_while_request_is_in_flight():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+
+    assert "let applyInFlight = false" in script
+    assert "controlStateForDryRun(lastDryRun, confirmCheckbox.checked, applyInFlight)" in script
+    assert "if (applyInFlight)" in script
+    assert "applyInFlight = true" in script
+    assert "applyInFlight = false" in script
+
+
+def test_frontend_restores_apply_state_when_apply_request_throws():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+
+    apply_handler = script[script.index('applyButton.addEventListener("click", async () => {'):]
+    assert "try {\n      const applyRequest = buildApplyRequest(" in apply_handler
+    assert "catch (error) {" in apply_handler
+    assert "finally {\n      applyInFlight = false;\n      refreshApplyState();\n    }" in apply_handler

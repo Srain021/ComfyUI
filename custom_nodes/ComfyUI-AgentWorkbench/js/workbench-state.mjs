@@ -1,10 +1,10 @@
-export function controlStateForDryRun(lastDryRun, confirmChecked) {
+export function controlStateForDryRun(lastDryRun, confirmChecked, applyInFlight = false) {
   const needsConfirmation = Boolean(lastDryRun?.plan?.requires_confirmation);
   return {
     needsConfirmation,
     confirmHidden: !needsConfirmation,
     cancelHidden: !lastDryRun?.plan,
-    applyDisabled: !lastDryRun?.plan || (needsConfirmation && !confirmChecked),
+    applyDisabled: applyInFlight || !lastDryRun?.plan || (needsConfirmation && !confirmChecked),
   };
 }
 
