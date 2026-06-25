@@ -249,3 +249,61 @@ def test_register_routes_adds_agent_context_post_route():
         }
     finally:
         agent_routes._REGISTERED = False
+
+
+def test_register_routes_adds_dry_run_and_apply_routes():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        dry_run_response = asyncio.run(
+            routes_by_key[("POST", "/agent/dry-run")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "summary": "inspect",
+                        "actions": [{"type": "context.collect", "payload": {}}],
+                    }
+                )
+            )
+        )
+        dry_run_payload = json.loads(dry_run_response.text)
+
+        assert dry_run_payload["status"] == "dry_run"
+        assert dry_run_payload["plan"]["plan_hash"]
+
+        apply_response = asyncio.run(
+            routes_by_key[("POST", "/agent/apply")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "plan": dry_run_payload["plan"],
+                        "approved_hash": dry_run_payload["plan"]["plan_hash"],
+                    }
+                )
+            )
+        )
+
+        assert json.loads(apply_response.text) == {
+            "ok": True,
+            "status": "accepted",
+            "applied": [],
+        }
+
+        invalid_response = asyncio.run(
+            routes_by_key[("POST", "/agent/dry-run")].handler(
+                _FakeRequest(decoded_body={"summary": "", "actions": []})
+            )
+        )
+
+        assert invalid_response.status == 400
+        assert json.loads(invalid_response.text)["ok"] is False
+    finally:
+        agent_routes._REGISTERED = False

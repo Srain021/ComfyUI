@@ -9,7 +9,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
-from agent_workbench.actions import ACTION_REGISTRY, PlanValidationError, stable_plan_hash, validate_plan
+from agent_workbench.actions import (
+    ACTION_REGISTRY,
+    PlanValidationError,
+    apply_plan,
+    dry_run_plan,
+    stable_plan_hash,
+    validate_plan,
+)
 from agent_workbench.permissions import CAPABILITY_LEVELS, RISK_ORDER
 
 
@@ -137,3 +144,66 @@ def test_action_registry_references_known_capabilities_and_risks():
     for capability, risk_level in ACTION_REGISTRY.values():
         assert capability in CAPABILITY_LEVELS
         assert risk_level in RISK_ORDER
+
+
+def test_dry_run_returns_plan_hash_and_preview():
+    result = dry_run_plan(
+        {"summary": "inspect", "actions": [{"type": "context.collect", "payload": {}}]}
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["plan"]["plan_hash"]
+    assert result["preview"][0]["type"] == "context.collect"
+    assert result["preview"][0]["capability"] == "context.read"
+
+
+def test_apply_rejects_changed_hash():
+    dry_run = dry_run_plan(
+        {"summary": "inspect", "actions": [{"type": "context.collect", "payload": {}}]}
+    )
+
+    result = apply_plan(dry_run["plan"], approved_hash="wrong")
+
+    assert result["ok"] is False
+    assert result["error"] == "approved_hash_mismatch"
+
+
+def test_apply_revalidates_submitted_plan_before_hash_comparison():
+    dry_run = dry_run_plan(
+        {"summary": "inspect", "actions": [{"type": "context.collect", "payload": {}}]}
+    )
+    tampered = deepcopy(dry_run["plan"])
+    tampered["actions"][0]["payload"]["extra"] = "changed after approval"
+
+    result = apply_plan(tampered, approved_hash=dry_run["plan"]["plan_hash"])
+
+    assert result["ok"] is False
+    assert result["error"] == "approved_hash_mismatch"
+    assert result["expected_hash"] != dry_run["plan"]["plan_hash"]
+
+
+def test_apply_does_not_trust_client_supplied_confirmation_fields():
+    dry_run = dry_run_plan(
+        {"summary": "free memory", "actions": [{"type": "runtime.free_memory", "payload": {}}]}
+    )
+    tampered = deepcopy(dry_run["plan"])
+    tampered["requires_confirmation"] = False
+    tampered["risk_level"] = "read"
+    tampered["actions"][0]["risk_level"] = "read"
+    tampered["actions"][0]["capability"] = "context.read"
+
+    result = apply_plan(tampered, approved_hash=dry_run["plan"]["plan_hash"])
+
+    assert result == {"ok": False, "error": "confirmation_required"}
+
+
+def test_apply_accepts_confirmed_matching_plan():
+    dry_run = dry_run_plan(
+        {"summary": "free memory", "actions": [{"type": "runtime.free_memory", "payload": {}}]}
+    )
+    confirmed = deepcopy(dry_run["plan"])
+    confirmed["confirmed"] = True
+
+    result = apply_plan(confirmed, approved_hash=dry_run["plan"]["plan_hash"])
+
+    assert result == {"ok": True, "status": "accepted", "applied": []}

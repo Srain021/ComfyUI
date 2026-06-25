@@ -80,3 +80,31 @@ def stable_plan_hash(plan: dict) -> str:
     copy.pop("plan_hash", None)
     payload = json.dumps(copy, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def dry_run_plan(raw: dict) -> dict:
+    plan = validate_plan(raw)
+    preview = [
+        {
+            "type": action["type"],
+            "capability": action["capability"],
+            "risk_level": action["risk_level"],
+            "payload": action["payload"],
+        }
+        for action in plan["actions"]
+    ]
+    return {"status": "dry_run", "plan": plan, "preview": preview}
+
+
+def apply_plan(raw_plan: dict, approved_hash: str) -> dict:
+    plan = validate_plan(raw_plan)
+    expected_hash = stable_plan_hash(plan)
+    if approved_hash != expected_hash:
+        return {
+            "ok": False,
+            "error": "approved_hash_mismatch",
+            "expected_hash": expected_hash,
+        }
+    if plan.get("requires_confirmation") and raw_plan.get("confirmed") is not True:
+        return {"ok": False, "error": "confirmation_required"}
+    return {"ok": True, "status": "accepted", "applied": []}
