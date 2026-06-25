@@ -206,4 +206,10 @@ def test_apply_accepts_confirmed_matching_plan():
 
     result = apply_plan(confirmed, approved_hash=dry_run["plan"]["plan_hash"])
 
-    assert result == {"ok": True, "status": "accepted", "applied": []}
+    assert result == {
+        "ok": True,
+        "status": "applied",
+        "applied": [
+            {"type": "runtime.free_memory", "http_request": {"path": "/free", "json": {}}}
+        ],
+    }

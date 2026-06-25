@@ -75,7 +75,7 @@ def register_routes(prompt_server=None) -> None:
         plan = body.get("plan", {})
         approved_hash = body.get("approved_hash", "")
         try:
-            return web.json_response(apply_plan(plan, approved_hash=approved_hash))
+            return web.json_response(apply_plan(plan, approved_hash=approved_hash, root=Path.cwd()))
         except PlanValidationError as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 

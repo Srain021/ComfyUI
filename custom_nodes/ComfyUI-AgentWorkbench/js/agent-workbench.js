@@ -71,6 +71,24 @@ function renderJson(element, value) {
   element.textContent = JSON.stringify(value, null, 2);
 }
 
+async function executeFrontendRequest(request) {
+  const options = { method: request.method || "POST", headers: {} };
+  if (request.json) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(request.json);
+  }
+  if (request.body) {
+    options.body = request.body;
+  }
+  const response = await api.fetchApi(request.path, options);
+  const result = { path: request.path, status: response.status };
+  if (request.path.startsWith("/manager/queue/") && response.status === 200) {
+    const queueResponse = await api.fetchApi("/manager/queue/start", { method: "POST" });
+    result.queue_start_status = queueResponse.status;
+  }
+  return result;
+}
+
 function createWorkbenchPanel() {
   if (document.getElementById("agent-workbench-panel")) {
     return;
@@ -148,6 +166,26 @@ function createWorkbenchPanel() {
       } catch (error) {
         result.ok = false;
         result.browser_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (result.ok) {
+      try {
+        result.frontend_requests = [];
+        for (const applied of result.applied || []) {
+          if (applied.manager_request) {
+            result.frontend_requests.push(await executeFrontendRequest(applied.manager_request));
+          }
+          if (applied.http_request) {
+            result.frontend_requests.push(await executeFrontendRequest({
+              method: "POST",
+              path: applied.http_request.path,
+              json: applied.http_request.json,
+            }));
+          }
+        }
+      } catch (error) {
+        result.ok = false;
+        result.frontend_error = error instanceof Error ? error.message : String(error);
       }
     }
     renderJson(output, result);

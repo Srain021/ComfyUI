@@ -293,8 +293,14 @@ def test_register_routes_adds_dry_run_and_apply_routes():
 
         assert json.loads(apply_response.text) == {
             "ok": True,
-            "status": "accepted",
-            "applied": [],
+            "status": "applied",
+            "applied": [
+                {
+                    "type": "context.collect",
+                    "applied": False,
+                    "reason": "context action is read-only",
+                }
+            ],
         }
 
         invalid_response = asyncio.run(

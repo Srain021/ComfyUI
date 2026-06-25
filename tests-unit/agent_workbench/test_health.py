@@ -121,6 +121,9 @@ def test_frontend_wires_graph_actions_after_server_approval():
     assert "if (result.ok)" in script
     assert "result.browser_applied = applyGraphActions(lastDryRun.plan.actions)" in script
     assert "browser_error" in script
+    assert "executeFrontendRequest" in script
+    assert "manager_request" in script
+    assert "http_request" in script
     assert 'action.type === "graph.set_widget"' in graph_actions
     assert "app.graph.getNodeById" in graph_actions
     assert "app.graph.setDirtyCanvas(true, true)" in graph_actions
