@@ -616,6 +616,37 @@ def test_rule_planner_sets_widget_on_all_matching_nodes():
     ]
 
 
+def test_rule_planner_sets_clip_skip_by_semantic_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 clip skip 节点设置为 -2",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 21,
+                        "type": "CLIPSetLastLayer",
+                        "title": "CLIP Set Last Layer",
+                        "widgets": [{"name": "stop_at_clip_layer", "value": -1}],
+                    },
+                    {
+                        "id": 22,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "widgets": [{"name": "text", "value": "old"}],
+                    },
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 21, "widget": "stop_at_clip_layer", "value": -2},
+        }
+    ]
+
+
 def test_rule_planner_adjusts_widget_on_all_matching_nodes():
     plan = RuleBasedPlanner().plan(
         "把全部 KSampler 的 cfg 降低 1",

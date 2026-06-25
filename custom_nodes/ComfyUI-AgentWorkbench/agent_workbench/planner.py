@@ -162,6 +162,10 @@ NODE_LABEL_ALIASES = (
         ("负面提示词", "反向提示词", "负向提示词", "负面 prompt", "负面prompt", "negative prompt", "negative"),
         ("negative prompt", "negative"),
     ),
+    (
+        ("clip skip", "clip layer", "clip 层", "clip跳层"),
+        ("clipsetlastlayer", "clip set last layer"),
+    ),
 )
 
 
@@ -299,6 +303,7 @@ WIDGET_ALIASES = (
     (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
     (("prompt", "提示词", "文本", "内容", "text"), ("text", "prompt", "prompt_text", "positive")),
     (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
+    (("clip skip", "clip layer", "clip 层", "clip跳层"), ("stop_at_clip_layer",)),
     (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),
     (("lora 权重", "lora强度", "权重", "强度", "strength"), ("strength_model", "strength", "weight")),
     (("lora模型", "lora 模型", "lora model", "lora"), ("lora_name", "lora", "lora_model_name")),
