@@ -170,7 +170,17 @@ def _run_healthcheck(executor) -> list[dict]:
     return [executor.run_command(command) for command in commands]
 
 
-def _dispatch_action(action: dict, root: Path, executor) -> dict:
+def _workflow_payload_for_save(payload: dict, action_type: str, browser_workflow: object) -> object:
+    if "workflow" in payload:
+        return payload["workflow"]
+    if payload.get("workflow_from_browser") is True:
+        if not isinstance(browser_workflow, dict):
+            raise PlanValidationError(f"{action_type} requires browser_workflow")
+        return browser_workflow
+    return _required_payload(payload, "workflow", action_type)
+
+
+def _dispatch_action(action: dict, root: Path, executor, browser_workflow: object = None) -> dict:
     action_type = action["type"]
     payload = action.get("payload", {})
     if action_type.startswith("graph."):
@@ -183,7 +193,7 @@ def _dispatch_action(action: dict, root: Path, executor) -> dict:
         return {"type": action_type, "commands": _run_healthcheck(executor)}
     if action_type == "workflow.save":
         path = str(_required_payload(payload, "path", action_type))
-        workflow = _required_payload(payload, "workflow", action_type)
+        workflow = _workflow_payload_for_save(payload, action_type, browser_workflow)
         target = resolve_workflow_path(root, path)
         result = save_workflow_with_snapshot(target, workflow, _agent_backup_dir(root))
         return {"type": action_type, "workflow": result}
@@ -248,7 +258,13 @@ def _deferred_action(action: dict, index: int) -> dict:
     return {"type": action["type"], "deferred": True, "action_index": index}
 
 
-def apply_plan(raw_plan: dict, approved_hash: str, root: Path | None = None, executor=None) -> dict:
+def apply_plan(
+    raw_plan: dict,
+    approved_hash: str,
+    root: Path | None = None,
+    executor=None,
+    browser_workflow: object = None,
+) -> dict:
     root = root or Path.cwd()
     executor = executor or DefaultExecutor()
     confirmed = isinstance(raw_plan, dict) and raw_plan.get("confirmed") is True
@@ -265,7 +281,7 @@ def apply_plan(raw_plan: dict, approved_hash: str, root: Path | None = None, exe
             if frontend_barrier_seen and action["type"] in SERVER_DEFERABLE_ACTIONS:
                 applied.append(_deferred_action(action, index))
                 continue
-            applied.append(_dispatch_action(action, root, executor))
+            applied.append(_dispatch_action(action, root, executor, browser_workflow=browser_workflow))
             if _is_frontend_mediated_action(action):
                 frontend_barrier_seen = True
     except (OSError, ValueError) as exc:
@@ -279,6 +295,7 @@ def apply_deferred_action(
     action_index: int,
     root: Path | None = None,
     executor=None,
+    browser_workflow: object = None,
 ) -> dict:
     root = root or Path.cwd()
     executor = executor or DefaultExecutor()
@@ -297,7 +314,7 @@ def apply_deferred_action(
     if not any(_is_frontend_mediated_action(item) for item in plan["actions"][:action_index]):
         return {"ok": False, "error": "deferred_action_has_no_frontend_prerequisite"}
     try:
-        applied = _dispatch_action(action, root, executor)
+        applied = _dispatch_action(action, root, executor, browser_workflow=browser_workflow)
     except (OSError, ValueError) as exc:
         raise PlanValidationError(str(exc)) from exc
     return {"ok": True, "status": "applied", "applied": applied}

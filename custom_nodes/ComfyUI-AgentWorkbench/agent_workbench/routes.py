@@ -44,6 +44,13 @@ def _graph_from_body(body: dict) -> object:
     return graph
 
 
+def _browser_workflow_from_body(body: dict) -> object:
+    workflow = body.get("browser_workflow")
+    if isinstance(workflow, dict):
+        return workflow
+    return None
+
+
 async def _json_request(request) -> dict:
     if not getattr(request, "can_read_body", False):
         return {}
@@ -108,12 +115,14 @@ def register_routes(prompt_server=None) -> None:
         body = await _json_request(request)
         plan = body.get("plan", {})
         approved_hash = body.get("approved_hash", "")
+        browser_workflow = _browser_workflow_from_body(body)
         try:
             result = await asyncio.to_thread(
                 apply_plan,
                 plan,
                 approved_hash=approved_hash,
                 root=Path.cwd(),
+                browser_workflow=browser_workflow,
             )
             return web.json_response(result)
         except PlanValidationError as exc:
@@ -125,6 +134,7 @@ def register_routes(prompt_server=None) -> None:
         plan = body.get("plan", {})
         approved_hash = body.get("approved_hash", "")
         action_index = body.get("action_index")
+        browser_workflow = _browser_workflow_from_body(body)
         try:
             result = await asyncio.to_thread(
                 apply_deferred_action,
@@ -132,6 +142,7 @@ def register_routes(prompt_server=None) -> None:
                 approved_hash=approved_hash,
                 action_index=action_index,
                 root=Path.cwd(),
+                browser_workflow=browser_workflow,
             )
             return web.json_response(result)
         except PlanValidationError as exc:

@@ -5,6 +5,7 @@ import {
   buildApplyRequest,
   cancelDryRunState,
   controlStateForDryRun,
+  planNeedsBrowserWorkflow,
 } from "../../../custom_nodes/ComfyUI-AgentWorkbench/js/workbench-state.mjs";
 
 test("control state requires confirmation before elevated apply", () => {
@@ -78,6 +79,91 @@ test("buildApplyRequest carries confirmed only for elevated plans", () => {
     },
   });
   assert.deepEqual(buildApplyRequest(canvas, true), {
+    approved_hash: "canvas123",
+    plan: {
+      summary: "Edit prompt",
+      actions: [{ type: "graph.set_widget", payload: { node_id: 7 } }],
+      requires_confirmation: false,
+      plan_hash: "canvas123",
+    },
+  });
+});
+
+test("planNeedsBrowserWorkflow only matches browser-backed workflow saves", () => {
+  assert.equal(
+    planNeedsBrowserWorkflow({
+      actions: [
+        {
+          type: "workflow.save",
+          payload: { path: "agent/sample.json", workflow_from_browser: true },
+        },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    planNeedsBrowserWorkflow({
+      actions: [
+        {
+          type: "workflow.save",
+          payload: { path: "agent/sample.json", workflow: { nodes: [] } },
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    planNeedsBrowserWorkflow({
+      actions: [{ type: "graph.set_widget", payload: { node_id: 7 } }],
+    }),
+    false,
+  );
+});
+
+test("buildApplyRequest attaches browser workflow only when the plan needs it", () => {
+  const dryRun = {
+    plan: {
+      summary: "Save workflow",
+      actions: [
+        {
+          type: "workflow.save",
+          payload: { path: "agent/sample.json", workflow_from_browser: true },
+        },
+      ],
+      requires_confirmation: true,
+      plan_hash: "save123",
+    },
+  };
+
+  assert.deepEqual(buildApplyRequest(dryRun, true, { nodes: [{ id: 12 }] }), {
+    approved_hash: "save123",
+    browser_workflow: { nodes: [{ id: 12 }] },
+    plan: {
+      summary: "Save workflow",
+      actions: [
+        {
+          type: "workflow.save",
+          payload: { path: "agent/sample.json", workflow_from_browser: true },
+        },
+      ],
+      requires_confirmation: true,
+      plan_hash: "save123",
+      confirmed: true,
+    },
+  });
+});
+
+test("buildApplyRequest omits browser workflow for ordinary graph edits", () => {
+  const dryRun = {
+    plan: {
+      summary: "Edit prompt",
+      actions: [{ type: "graph.set_widget", payload: { node_id: 7 } }],
+      requires_confirmation: false,
+      plan_hash: "canvas123",
+    },
+  };
+
+  assert.deepEqual(buildApplyRequest(dryRun, false, { nodes: [{ id: 7 }] }), {
     approved_hash: "canvas123",
     plan: {
       summary: "Edit prompt",

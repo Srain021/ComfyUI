@@ -8,7 +8,18 @@ export function controlStateForDryRun(lastDryRun, confirmChecked) {
   };
 }
 
-export function buildApplyRequest(lastDryRun, confirmChecked) {
+export function planNeedsBrowserWorkflow(plan) {
+  return Boolean(
+    plan?.actions?.some(
+      (action) =>
+        action?.type === "workflow.save" &&
+        action?.payload?.workflow_from_browser === true &&
+        action?.payload?.workflow === undefined,
+    ),
+  );
+}
+
+export function buildApplyRequest(lastDryRun, confirmChecked, browserWorkflow = null) {
   if (!lastDryRun?.plan) {
     return null;
   }
@@ -16,10 +27,14 @@ export function buildApplyRequest(lastDryRun, confirmChecked) {
   if (lastDryRun.plan.requires_confirmation) {
     plan.confirmed = confirmChecked;
   }
-  return {
+  const request = {
     plan,
     approved_hash: lastDryRun.plan.plan_hash,
   };
+  if (browserWorkflow && planNeedsBrowserWorkflow(lastDryRun.plan)) {
+    request.browser_workflow = browserWorkflow;
+  }
+  return request;
 }
 
 export function cancelDryRunState() {

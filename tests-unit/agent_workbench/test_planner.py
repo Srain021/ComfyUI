@@ -41,6 +41,47 @@ def test_rule_planner_prerender_free_memory_then_queues_workflow_to_front():
     ]
 
 
+def test_rule_planner_saves_current_workflow_from_browser_snapshot():
+    plan = RuleBasedPlanner().plan("保存当前工作流到 agent/sample.json", context={})
+
+    assert plan["actions"] == [
+        {
+            "type": "workflow.save",
+            "payload": {"path": "agent/sample.json", "workflow_from_browser": True},
+        }
+    ]
+
+
+def test_rule_planner_edits_prompt_then_saves_current_workflow():
+    plan = RuleBasedPlanner().plan(
+        "把这个 prompt 节点改成 neon skyline 然后保存当前工作流到 agent/prompt.json",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 12,
+                        "type": "CLIPTextEncode",
+                        "title": "Prompt",
+                        "selected": True,
+                        "widgets": [{"name": "text", "value": "old"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 12, "widget": "text", "value": "neon skyline"},
+        },
+        {
+            "type": "workflow.save",
+            "payload": {"path": "agent/prompt.json", "workflow_from_browser": True},
+        },
+    ]
+
+
 def test_rule_planner_plans_service_healthcheck():
     plan = RuleBasedPlanner().plan("检查 ComfyUI 容器健康和内存", context={})
 

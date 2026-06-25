@@ -5,6 +5,7 @@ import {
   buildApplyRequest,
   cancelDryRunState,
   controlStateForDryRun,
+  planNeedsBrowserWorkflow,
 } from "./workbench-state.mjs";
 
 const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
@@ -70,6 +71,13 @@ function currentGraphSnapshot() {
       type: link.type,
     })),
   };
+}
+
+function currentWorkflowSnapshot() {
+  if (typeof app.graph?.serialize === "function") {
+    return app.graph.serialize();
+  }
+  return currentGraphSnapshot();
 }
 
 async function postJson(path, body) {
@@ -229,7 +237,11 @@ function createWorkbenchPanel() {
     if (!lastDryRun?.plan) {
       return;
     }
-    const applyRequest = buildApplyRequest(lastDryRun, confirmCheckbox.checked);
+    const applyRequest = buildApplyRequest(
+      lastDryRun,
+      confirmCheckbox.checked,
+      currentWorkflowSnapshot(),
+    );
     const plan = applyRequest.plan;
     const approvedHash = applyRequest.approved_hash;
     const result = await postJson("/agent/apply", applyRequest);
@@ -267,11 +279,15 @@ function createWorkbenchPanel() {
         result.deferred_server_actions = [];
         for (const applied of result.applied || []) {
           if (applied.deferred === true && Number.isInteger(applied.action_index)) {
-            result.deferred_server_actions.push(await postJson("/agent/apply-deferred", {
+            const deferredRequest = {
               plan,
               approved_hash: approvedHash,
               action_index: applied.action_index,
-            }));
+            };
+            if (planNeedsBrowserWorkflow(plan)) {
+              deferredRequest.browser_workflow = currentWorkflowSnapshot();
+            }
+            result.deferred_server_actions.push(await postJson("/agent/apply-deferred", deferredRequest));
           }
         }
       } catch (error) {

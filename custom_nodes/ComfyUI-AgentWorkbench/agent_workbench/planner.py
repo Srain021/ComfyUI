@@ -1964,9 +1964,24 @@ QUEUE_PROMPT_TERMS = (
 )
 
 
+WORKFLOW_SAVE_PATTERNS = (
+    r"(?:保存|存为|另存为)(?:当前|这个)?(?:工作流|workflow)?(?:到|为|成|至)\s*(?P<path>[^，。；;\s]+)",
+    r"(?:当前|这个)?(?:工作流|workflow)(?:保存|存为|另存为)(?:到|为|成|至)\s*(?P<path>[^，。；;\s]+)",
+    r"\bsave(?:\s+(?:current|this))?(?:\s+workflow)?\s+(?:to|as)\s+(?P<path>\S+)",
+)
+
+
 def _mentions_runtime_queue_prompt(text: str) -> bool:
     lowered = text.lower()
     return any(term in lowered or term in text for term in QUEUE_PROMPT_TERMS)
+
+
+def _connector_stripped_prefix(text: str, start: int) -> str:
+    prefix = text[:start].rstrip()
+    for connector in ("and then", "然后", "之后", "接着", "then", "and", "并", "再"):
+        if prefix.lower().endswith(connector):
+            return text[: len(prefix) - len(connector)]
+    return prefix
 
 
 def _strip_queue_prompt_clause(text: str) -> str:
@@ -1979,23 +1994,64 @@ def _strip_queue_prompt_clause(text: str) -> str:
     if not starts:
         return text
     start = min(starts)
-    prefix = text[:start].rstrip()
-    for connector in ("and then", "然后", "之后", "接着", "then", "and", "并", "再"):
-        if prefix.lower().endswith(connector):
-            start = len(prefix) - len(connector)
-            break
-    else:
-        if start > 0:
+    if start > 0:
+        prefix = _connector_stripped_prefix(text, start)
+        if prefix == text[:start].rstrip():
             return text
+        return _strip_value(prefix)
     return _strip_value(text[:start])
 
 
-def _combine_with_queue_prompt(plan: dict, queue_plan: dict | None, graph_text: str, text: str) -> dict:
-    if queue_plan is None or graph_text == text:
+def _workflow_save_match(text: str) -> re.Match | None:
+    matches = []
+    for pattern in WORKFLOW_SAVE_PATTERNS:
+        matches.extend(re.finditer(pattern, text, re.IGNORECASE))
+    if not matches:
+        return None
+    return min(matches, key=lambda match: match.start())
+
+
+def _strip_workflow_save_clause(text: str) -> str:
+    match = _workflow_save_match(text)
+    if match is None:
+        return text
+    if match.start() > 0:
+        return _strip_value(_connector_stripped_prefix(text, match.start()))
+    return _strip_value(text[: match.start()])
+
+
+def _plan_workflow_save(text: str) -> dict | None:
+    match = _workflow_save_match(text)
+    if match is None:
+        return None
+    path = _strip_value(match.group("path"))
+    if not path:
+        return None
+    return {
+        "summary": f"Save current ComfyUI workflow to {path}",
+        "actions": [
+            {
+                "type": "workflow.save",
+                "payload": {"path": path, "workflow_from_browser": True},
+            }
+        ],
+    }
+
+
+def _combine_with_followup_plans(
+    plan: dict,
+    followup_plans: list[dict],
+    graph_text: str,
+    text: str,
+) -> dict:
+    if not followup_plans or graph_text == text:
         return plan
     return {
-        "summary": f"{plan['summary']} then queue workflow",
-        "actions": [*plan["actions"], *queue_plan["actions"]],
+        "summary": f"{plan['summary']} then apply follow-up action(s)",
+        "actions": [
+            *plan["actions"],
+            *(action for item in followup_plans for action in item["actions"]),
+        ],
     }
 
 
@@ -2106,55 +2162,80 @@ class RuleBasedPlanner:
         text = message.strip() if isinstance(message, str) else ""
         lowered = text.lower()
         queue_prompt_plan = _plan_runtime_queue_prompt(text)
-        graph_text = _strip_queue_prompt_clause(text) if queue_prompt_plan is not None else text
-        graph_delete_plan = _plan_graph_delete_node(text, context)
+        workflow_save_plan = _plan_workflow_save(text)
+        followup_plans = [
+            plan for plan in (workflow_save_plan, queue_prompt_plan) if plan is not None
+        ]
+        graph_text = text
+        if workflow_save_plan is not None:
+            graph_text = _strip_workflow_save_clause(graph_text)
+        if queue_prompt_plan is not None:
+            graph_text = _strip_queue_prompt_clause(graph_text)
+        graph_delete_plan = _plan_graph_delete_node(graph_text, context)
         if graph_delete_plan is not None:
-            return graph_delete_plan
-        graph_copy_widget_plan = _plan_graph_copy_widget_value(text, context)
+            return _combine_with_followup_plans(graph_delete_plan, followup_plans, graph_text, text)
+        graph_copy_widget_plan = _plan_graph_copy_widget_value(graph_text, context)
         if graph_copy_widget_plan is not None:
-            return graph_copy_widget_plan
-        graph_duplicate_plan = _plan_graph_duplicate_node(text, context)
+            return _combine_with_followup_plans(
+                graph_copy_widget_plan, followup_plans, graph_text, text
+            )
+        graph_duplicate_plan = _plan_graph_duplicate_node(graph_text, context)
         if graph_duplicate_plan is not None:
-            return graph_duplicate_plan
-        graph_color_plan = _plan_graph_set_color(text, context)
+            return _combine_with_followup_plans(
+                graph_duplicate_plan, followup_plans, graph_text, text
+            )
+        graph_color_plan = _plan_graph_set_color(graph_text, context)
         if graph_color_plan is not None:
-            return graph_color_plan
-        graph_mode_plan = _plan_graph_set_mode(text, context)
+            return _combine_with_followup_plans(graph_color_plan, followup_plans, graph_text, text)
+        graph_mode_plan = _plan_graph_set_mode(graph_text, context)
         if graph_mode_plan is not None:
-            return graph_mode_plan
-        graph_title_plan = _plan_graph_set_title(text, context)
+            return _combine_with_followup_plans(graph_mode_plan, followup_plans, graph_text, text)
+        graph_title_plan = _plan_graph_set_title(graph_text, context)
         if graph_title_plan is not None:
-            return graph_title_plan
-        graph_align_plan = _plan_graph_align_nodes(text, context)
+            return _combine_with_followup_plans(graph_title_plan, followup_plans, graph_text, text)
+        graph_align_plan = _plan_graph_align_nodes(graph_text, context)
         if graph_align_plan is not None:
-            return graph_align_plan
-        graph_distribute_plan = _plan_graph_distribute_nodes(text, context)
+            return _combine_with_followup_plans(graph_align_plan, followup_plans, graph_text, text)
+        graph_distribute_plan = _plan_graph_distribute_nodes(graph_text, context)
         if graph_distribute_plan is not None:
-            return graph_distribute_plan
-        graph_position_plan = _plan_graph_set_position(text, context)
+            return _combine_with_followup_plans(
+                graph_distribute_plan, followup_plans, graph_text, text
+            )
+        graph_position_plan = _plan_graph_set_position(graph_text, context)
         if graph_position_plan is not None:
-            return graph_position_plan
-        graph_select_plan = _plan_graph_select_node(text, context)
+            return _combine_with_followup_plans(
+                graph_position_plan, followup_plans, graph_text, text
+            )
+        graph_select_plan = _plan_graph_select_node(graph_text, context)
         if graph_select_plan is not None:
-            return graph_select_plan
-        graph_disconnect_plan = _plan_graph_disconnect(text, context)
+            return _combine_with_followup_plans(graph_select_plan, followup_plans, graph_text, text)
+        graph_disconnect_plan = _plan_graph_disconnect(graph_text, context)
         if graph_disconnect_plan is not None:
-            return graph_disconnect_plan
-        graph_connect_plan = _plan_graph_connect(text, context)
+            return _combine_with_followup_plans(
+                graph_disconnect_plan, followup_plans, graph_text, text
+            )
+        graph_connect_plan = _plan_graph_connect(graph_text, context)
         if graph_connect_plan is not None:
-            return graph_connect_plan
-        graph_add_plan = _plan_graph_add_node(text)
+            return _combine_with_followup_plans(graph_connect_plan, followup_plans, graph_text, text)
+        graph_add_plan = _plan_graph_add_node(graph_text)
         if graph_add_plan is not None:
-            return graph_add_plan
+            return _combine_with_followup_plans(graph_add_plan, followup_plans, graph_text, text)
         graph_plan = _plan_graph_widget_edit(graph_text, context)
         if graph_plan is not None:
-            return _combine_with_queue_prompt(graph_plan, queue_prompt_plan, graph_text, text)
+            return _combine_with_followup_plans(graph_plan, followup_plans, graph_text, text)
         prerender_queue_plan = _combine_prerender_with_queue(
             _plan_prerender_free_memory(text),
             queue_prompt_plan,
         )
         if prerender_queue_plan is not None:
             return prerender_queue_plan
+        if workflow_save_plan is not None and queue_prompt_plan is not None:
+            return {
+                "summary": "Save current workflow then queue current workflow",
+                "actions": [*workflow_save_plan["actions"], *queue_prompt_plan["actions"]],
+            }
+        if workflow_save_plan is not None:
+            return workflow_save_plan
         if queue_prompt_plan is not None:
             return queue_prompt_plan
         clear_queue_plan = _plan_runtime_clear_queue(text)

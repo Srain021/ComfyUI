@@ -320,13 +320,14 @@ def test_register_routes_adds_apply_deferred_route(monkeypatch):
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
     calls = []
 
-    def fake_apply_deferred_action(plan, approved_hash, action_index, root):
+    def fake_apply_deferred_action(plan, approved_hash, action_index, root, browser_workflow=None):
         calls.append(
             {
                 "plan": plan,
                 "approved_hash": approved_hash,
                 "action_index": action_index,
                 "root": root,
+                "browser_workflow": browser_workflow,
             }
         )
         return {"ok": True, "status": "applied", "applied": {"type": "service.restart_container"}}
@@ -366,7 +367,7 @@ def test_apply_route_runs_blocking_dispatch_outside_event_loop(monkeypatch):
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
 
-    def fake_apply_plan(plan, approved_hash, root):
+    def fake_apply_plan(plan, approved_hash, root, browser_workflow=None):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -397,6 +398,102 @@ def test_apply_route_runs_blocking_dispatch_outside_event_loop(monkeypatch):
         )
 
         assert json.loads(response.text) == {"ok": True, "threaded": True}
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_apply_route_passes_browser_workflow_to_dispatch(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_apply_plan(plan, approved_hash, root, browser_workflow=None):
+        calls.append(
+            {
+                "plan": plan,
+                "approved_hash": approved_hash,
+                "root": root,
+                "browser_workflow": browser_workflow,
+            }
+        )
+        return {"ok": True, "status": "applied", "applied": []}
+
+    monkeypatch.setattr(agent_routes, "apply_plan", fake_apply_plan)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/apply")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "plan": {"summary": "save", "actions": []},
+                        "approved_hash": "hash",
+                        "browser_workflow": {"nodes": [{"id": 12}]},
+                    }
+                )
+            )
+        )
+
+        assert json.loads(response.text)["ok"] is True
+        assert calls[0]["browser_workflow"] == {"nodes": [{"id": 12}]}
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_apply_deferred_route_passes_browser_workflow_to_dispatch(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_apply_deferred_action(plan, approved_hash, action_index, root, browser_workflow=None):
+        calls.append(
+            {
+                "plan": plan,
+                "approved_hash": approved_hash,
+                "action_index": action_index,
+                "root": root,
+                "browser_workflow": browser_workflow,
+            }
+        )
+        return {"ok": True, "status": "applied", "applied": {"type": "workflow.save"}}
+
+    monkeypatch.setattr(agent_routes, "apply_deferred_action", fake_apply_deferred_action)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/apply-deferred")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "plan": {"summary": "save", "actions": []},
+                        "approved_hash": "hash",
+                        "action_index": 1,
+                        "browser_workflow": {"nodes": [{"id": 12, "widgets_values": ["neon"]}]},
+                    }
+                )
+            )
+        )
+
+        assert json.loads(response.text)["ok"] is True
+        assert calls[0]["browser_workflow"] == {
+            "nodes": [{"id": 12, "widgets_values": ["neon"]}]
+        }
     finally:
         agent_routes._REGISTERED = False
 

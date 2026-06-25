@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
-from agent_workbench.actions import apply_plan, dry_run_plan
+from agent_workbench.actions import apply_deferred_action, apply_plan, dry_run_plan
 from agent_workbench.executor import RecordingExecutor
 from agent_workbench.ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
 
@@ -67,3 +67,82 @@ def test_apply_dispatches_confirmed_workflow_save(tmp_path):
     assert result["ok"] is True
     assert result["applied"][0]["type"] == "workflow.save"
     assert json.loads(target.read_text(encoding="utf-8")) == {"nodes": []}
+
+
+def test_apply_saves_browser_workflow_when_plan_requests_browser_snapshot(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Save workflow",
+            "actions": [
+                {
+                    "type": "workflow.save",
+                    "payload": {"path": "agent/browser.json", "workflow_from_browser": True},
+                }
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=RecordingExecutor(),
+        browser_workflow={"nodes": [{"id": 12, "type": "CLIPTextEncode"}]},
+    )
+
+    target = tmp_path / "user" / "default" / "workflows" / "agent" / "browser.json"
+    assert result["ok"] is True
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "nodes": [{"id": 12, "type": "CLIPTextEncode"}]
+    }
+
+
+def test_deferred_workflow_save_uses_browser_workflow_after_graph_actions(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Edit prompt then save workflow",
+            "actions": [
+                {
+                    "type": "graph.set_widget",
+                    "payload": {"node_id": 12, "widget": "text", "value": "neon skyline"},
+                },
+                {
+                    "type": "workflow.save",
+                    "payload": {"path": "agent/after-edit.json", "workflow_from_browser": True},
+                },
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=RecordingExecutor(),
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][1] == {
+        "type": "workflow.save",
+        "deferred": True,
+        "action_index": 1,
+    }
+
+    followup = apply_deferred_action(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        action_index=1,
+        root=tmp_path,
+        executor=RecordingExecutor(),
+        browser_workflow={"nodes": [{"id": 12, "widgets_values": ["neon skyline"]}]},
+    )
+
+    target = tmp_path / "user" / "default" / "workflows" / "agent" / "after-edit.json"
+    assert followup["ok"] is True
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "nodes": [{"id": 12, "widgets_values": ["neon skyline"]}]
+    }
