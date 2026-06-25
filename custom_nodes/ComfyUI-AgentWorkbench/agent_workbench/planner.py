@@ -642,11 +642,73 @@ def _disconnect_input_plan(nodes: list[dict], target_phrase: str, slot_hint: str
     }
 
 
+def _disconnect_output_plan(nodes: list[dict], origin_phrase: str, slot_hint: str) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase)
+    if origin is None:
+        return None
+    origin_slot = _slot_index_for_hint(origin, "outputs", slot_hint)
+    if origin_slot is None:
+        return None
+    return {
+        "summary": f"Disconnect output {origin_slot} on node {origin.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": origin_slot,
+                },
+            }
+        ],
+    }
+
+
+def _disconnect_pair_plan(nodes: list[dict], origin_phrase: str, target_phrase: str) -> dict | None:
+    origin = _find_node_for_phrase(nodes, origin_phrase)
+    target = _find_node_for_phrase(nodes, target_phrase)
+    if origin is None or target is None:
+        return None
+    return {
+        "summary": f"Disconnect node {origin.get('id')} from node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "target_node_id": target.get("id"),
+                },
+            }
+        ],
+    }
+
+
 def _plan_graph_disconnect(text: str, context: dict) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("断开", "清空", "移除连接", "disconnect")):
         return None
     nodes = _graph_nodes(context)
+    pair_patterns = (
+        r"(?:断开|移除连接)\s*(.+?)\s*(?:到|和|与|->|to)\s*(.+?)\s*的?连接?$",
+        r"\bdisconnect\s+(.+?)\s+(?:from|to)\s+(.+?)$",
+    )
+    for pattern in pair_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _disconnect_pair_plan(nodes, match.group(1), match.group(2))
+        if plan is not None:
+            return plan
+    output_patterns = (
+        r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*([A-Za-z0-9_ -]+)\s*(?:输出|output)$",
+        r"\bdisconnect\s+(.+?)\s+([A-Za-z0-9_ -]+)\s+output\b",
+    )
+    for pattern in output_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        plan = _disconnect_output_plan(nodes, match.group(1), match.group(2))
+        if plan is not None:
+            return plan
     patterns = (
         r"(?:断开|清空|移除连接)\s*(.+?)\s*的\s*([A-Za-z0-9_ -]+)\s*(?:输入|input)?$",
         r"\bdisconnect\s+(.+?)\s+([A-Za-z0-9_ -]+)\s+input\b",

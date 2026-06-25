@@ -18,6 +18,24 @@ function requireNode(graph, nodeId) {
   return node;
 }
 
+function graphLinks(graph) {
+  const links = graph.links || [];
+  return Array.isArray(links) ? links.filter(Boolean) : Object.values(links).filter(Boolean);
+}
+
+function matchesOptional(value, expected) {
+  return expected === undefined || expected === null || String(value) === String(expected);
+}
+
+function matchingLinks(graph, payload) {
+  return graphLinks(graph).filter((link) => (
+    matchesOptional(link.origin_id, payload.origin_node_id)
+    && matchesOptional(link.origin_slot, payload.origin_slot)
+    && matchesOptional(link.target_id, payload.target_node_id)
+    && matchesOptional(link.target_slot, payload.target_slot)
+  ));
+}
+
 function resolveSlot(slots, value, label) {
   if (value === undefined || value === null) {
     return 0;
@@ -145,6 +163,22 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.disconnect") {
     const graph = currentGraph();
+    if (action.payload.origin_node_id !== undefined) {
+      const links = matchingLinks(graph, action.payload);
+      if (!links.length) {
+        throw new Error("No matching graph links to disconnect");
+      }
+      const rows = links.map((link) => {
+        const target = requireNode(graph, link.target_id);
+        if (typeof target.disconnectInput !== "function") {
+          throw new Error("Target node cannot disconnect inputs");
+        }
+        target.disconnectInput(link.target_slot);
+        return { target_node_id: target.id, target_slot: link.target_slot };
+      });
+      markGraphDirty(graph);
+      return { type: action.type, links: rows };
+    }
     const target = requireNode(graph, action.payload.target_node_id);
     const targetSlot = resolveSlot(target.inputs, action.payload.target_slot, "Target");
     if (typeof target.disconnectInput !== "function") {

@@ -513,6 +513,79 @@ def test_rule_planner_disconnects_selected_node_input():
     ]
 
 
+def test_rule_planner_disconnects_origin_output_by_title_and_slot_name():
+    plan = RuleBasedPlanner().plan(
+        "断开 Checkpoint 的 MODEL 输出",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 1,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Checkpoint",
+                        "outputs": [
+                            {"name": "MODEL", "type": "MODEL"},
+                            {"name": "CLIP", "type": "CLIP"},
+                        ],
+                    },
+                    {
+                        "id": 2,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [{"name": "model", "type": "MODEL"}],
+                    },
+                ],
+                "links": [
+                    {
+                        "id": 77,
+                        "origin_id": 1,
+                        "origin_slot": 0,
+                        "target_id": 2,
+                        "target_slot": 0,
+                    }
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.disconnect",
+            "payload": {"origin_node_id": 1, "origin_slot": 0},
+        }
+    ]
+
+
+def test_rule_planner_disconnects_nodes_by_title_pair():
+    plan = RuleBasedPlanner().plan(
+        "断开 Checkpoint 到 KSampler 的连接",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {"id": 1, "type": "CheckpointLoaderSimple", "title": "Checkpoint"},
+                    {"id": 2, "type": "KSampler", "title": "KSampler"},
+                ],
+                "links": [
+                    {
+                        "id": 77,
+                        "origin_id": 1,
+                        "origin_slot": 0,
+                        "target_id": 2,
+                        "target_slot": 0,
+                    }
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.disconnect",
+            "payload": {"origin_node_id": 1, "target_node_id": 2},
+        }
+    ]
+
+
 def test_rule_planner_plans_restart_container():
     plan = RuleBasedPlanner().plan("重启 ComfyUI 容器", context={})
 

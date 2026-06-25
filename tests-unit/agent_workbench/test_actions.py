@@ -126,7 +126,11 @@ def test_graph_disconnect_is_canvas_edit_without_extra_confirmation():
     plan = validate_plan(
         {
             "summary": "Disconnect KSampler positive input",
-            "actions": [{"type": "graph.disconnect", "payload": {"target_node_id": 2, "target_slot": 1}}],
+            "actions": [
+                {"type": "graph.disconnect", "payload": {"target_node_id": 2, "target_slot": 1}},
+                {"type": "graph.disconnect", "payload": {"origin_node_id": 1, "origin_slot": 0}},
+                {"type": "graph.disconnect", "payload": {"origin_node_id": 1, "target_node_id": 2}},
+            ],
         }
     )
 
