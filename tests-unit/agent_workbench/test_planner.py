@@ -259,6 +259,157 @@ def test_rule_planner_sets_multiple_widgets_on_same_node():
     ]
 
 
+def test_rule_planner_adds_checkpoint_node_with_initial_model_alias():
+    plan = RuleBasedPlanner().plan(
+        "添加一个 CheckpointLoaderSimple 节点，模型改成 dreamshaper.safetensors",
+        context={"graph_input": {"nodes": []}},
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.add_node",
+            "payload": {
+                "node_type": "CheckpointLoaderSimple",
+                "widgets": {"ckpt_name": "dreamshaper.safetensors"},
+            },
+        }
+    ]
+
+
+def test_rule_planner_sets_denoise_widget_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 KSampler 的重绘幅度改成 0.55",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 9,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "widgets": [
+                            {"name": "steps", "value": 20},
+                            {"name": "cfg", "value": 7.0},
+                            {"name": "denoise", "value": 1.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 9, "widget": "denoise", "value": 0.55}}
+    ]
+
+
+def test_rule_planner_sets_latent_batch_widget_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的批量改成 4",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 512},
+                            {"name": "height", "value": 512},
+                            {"name": "batch_size", "value": 1},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "batch_size", "value": 4}}
+    ]
+
+
+def test_rule_planner_sets_lora_model_strength_by_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 LoRA 模型权重改成 0.8",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 6,
+                        "type": "LoraLoader",
+                        "title": "LoRA",
+                        "widgets": [
+                            {"name": "lora_name", "value": "old.safetensors"},
+                            {"name": "strength_model", "value": 1.0},
+                            {"name": "strength_clip", "value": 1.0},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 6, "widget": "strength_model", "value": 0.8},
+        }
+    ]
+
+
+def test_rule_planner_sets_video_frame_count_by_chinese_alias():
+    plan = RuleBasedPlanner().plan(
+        "把 WanVideo 的帧数改成 81",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 10,
+                        "type": "WanVideoSampler",
+                        "title": "WanVideo",
+                        "widgets": [
+                            {"name": "width", "value": 832},
+                            {"name": "height", "value": 480},
+                            {"name": "num_frames", "value": 49},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 10, "widget": "num_frames", "value": 81}}
+    ]
+
+
+def test_rule_planner_sets_image_size_from_compact_dimensions():
+    plan = RuleBasedPlanner().plan(
+        "把 Empty Latent Image 的尺寸改成 1024x576",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "EmptyLatentImage",
+                        "title": "Empty Latent Image",
+                        "widgets": [
+                            {"name": "width", "value": 512},
+                            {"name": "height", "value": 512},
+                            {"name": "batch_size", "value": 1},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "width", "value": 1024}},
+        {"type": "graph.set_widget", "payload": {"node_id": 4, "widget": "height", "value": 576}},
+    ]
+
+
 def test_rule_planner_adds_node_from_natural_language():
     plan = RuleBasedPlanner().plan("添加一个 KSampler 节点", context={"graph_input": {"nodes": []}})
 

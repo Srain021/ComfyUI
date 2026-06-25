@@ -195,11 +195,20 @@ WIDGET_ALIASES = (
     (("negative", "负面", "反向"), ("negative", "negative_prompt", "neg_prompt", "text")),
     (("positive", "正向"), ("positive", "positive_prompt", "pos_prompt", "text")),
     (("prompt", "提示词", "文本", "text"), ("text", "prompt", "prompt_text", "positive")),
+    (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
+    (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),
+    (("lora 权重", "lora强度", "权重", "强度", "strength"), ("strength_model", "strength", "weight")),
+    (("lora模型", "lora 模型", "lora model", "lora"), ("lora_name", "lora", "lora_model_name")),
+    (("checkpoint", "ckpt", "大模型", "底模", "模型", "model"), ("ckpt_name", "checkpoint", "model_name", "unet_name")),
+    (("vae",), ("vae_name", "vae")),
     (("seed", "种子"), ("seed", "noise_seed")),
     (("steps", "步数"), ("steps",)),
     (("cfg",), ("cfg", "cfg_scale")),
     (("sampler", "采样器"), ("sampler_name", "sampler")),
     (("scheduler", "调度器"), ("scheduler",)),
+    (("denoise", "重绘幅度", "降噪", "去噪"), ("denoise",)),
+    (("batch", "batch size", "批量", "批次"), ("batch_size", "batch")),
+    (("frames", "frame count", "num_frames", "帧数", "视频帧数"), ("num_frames", "frames", "length")),
     (("width", "宽度"), ("width",)),
     (("height", "高度"), ("height",)),
 )
@@ -277,6 +286,24 @@ def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     return rows
 
 
+def _size_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("尺寸", "分辨率", "size", "resolution")):
+        return []
+    value = _extract_value_after_set(text)
+    if not value:
+        return []
+    match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", value)
+    if not match:
+        return []
+    widgets = _node_widgets(node)
+    width = _find_widget_by_name(widgets, ("width",))
+    height = _find_widget_by_name(widgets, ("height",))
+    if width is None or height is None:
+        return []
+    return [(width, _number_value(match.group(1))), (height, _number_value(match.group(2)))]
+
+
 def _extract_widget_delta(text: str) -> int | float | None:
     lowered = text.lower()
     direction = None
@@ -314,6 +341,22 @@ def _plan_graph_widget_edit(text: str, context: dict) -> dict | None:
     node = _select_node(nodes, text)
     if node is None:
         return None
+    size_assignments = _size_assignments(text, node)
+    if size_assignments:
+        return {
+            "summary": f"Set size widgets on node {node.get('id')}",
+            "actions": [
+                {
+                    "type": "graph.set_widget",
+                    "payload": {
+                        "node_id": node.get("id"),
+                        "widget": widget["name"],
+                        "value": value,
+                    },
+                }
+                for widget, value in size_assignments
+            ],
+        }
     assignments = _widget_assignments(text, node)
     if assignments:
         return {
