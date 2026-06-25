@@ -1733,6 +1733,14 @@ def _extract_custom_node_id(text: str) -> str | None:
     )
     if match:
         return match.group(1).rstrip(".,，。")
+    match = re.search(
+        r"(?:安装|禁用|启用|更新|升级|重装|重新安装|修复|install|disable|enable|update|reinstall|fix)?\s*"
+        r"([A-Za-z0-9_.:/-]+)\s*(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).rstrip(".,，。")
     return None
 
 

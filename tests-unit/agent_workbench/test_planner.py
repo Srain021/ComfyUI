@@ -2591,6 +2591,27 @@ def test_rule_planner_plans_custom_node_install_by_manager_id():
     ]
 
 
+def test_rule_planner_plans_plugin_install_when_id_precedes_marker():
+    plan = RuleBasedPlanner().plan("安装 ComfyUI-Impact-Pack 插件", context={})
+
+    assert plan["actions"] == [
+        {
+            "type": "custom_node.install",
+            "payload": {
+                "method": "manager_queue",
+                "node": {
+                    "id": "ComfyUI-Impact-Pack",
+                    "version": "unknown",
+                    "ui_id": "ComfyUI-Impact-Pack",
+                    "files": ["ComfyUI-Impact-Pack"],
+                    "channel": "default",
+                    "mode": "cache",
+                },
+            },
+        }
+    ]
+
+
 def test_rule_planner_plans_plugin_install_by_manager_id_then_restart():
     plan = RuleBasedPlanner().plan("安装插件 ComfyUI-Impact-Pack 然后重启 ComfyUI", context={})
 
@@ -2630,6 +2651,23 @@ def test_rule_planner_plans_plugin_disable():
 
     assert plan["actions"] == [
         {"type": "custom_node.disable", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+
+
+def test_rule_planner_plans_plugin_disable_when_id_precedes_marker():
+    plan = RuleBasedPlanner().plan("禁用 ComfyUI-TestNode 插件", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.disable", "payload": {"id": "ComfyUI-TestNode"}}
+    ]
+
+
+def test_rule_planner_plans_extension_enable_then_restart_when_id_precedes_marker():
+    plan = RuleBasedPlanner().plan("启用 ComfyUI-TestNode 扩展然后重启 ComfyUI", context={})
+
+    assert plan["actions"] == [
+        {"type": "custom_node.enable", "payload": {"id": "ComfyUI-TestNode"}},
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
     ]
 
 
