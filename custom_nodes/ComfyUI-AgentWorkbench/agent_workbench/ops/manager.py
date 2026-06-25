@@ -84,6 +84,8 @@ def manager_request_for_action(action: dict) -> dict:
             "path": "/manager/queue/install",
             "json": _switch_version_payload(payload),
         }
+    if action_type == "service.update_comfyui":
+        return {"method": "POST", "path": "/manager/queue/update_comfyui"}
     if action_type in {
         "custom_node.update",
         "custom_node.reinstall",

@@ -102,6 +102,12 @@ def test_manager_switch_version_request_uses_queue_install_with_selected_version
     assert request["json"]["selected_version"] == "1.2.3"
 
 
+def test_manager_update_comfyui_request_uses_queue_update_comfyui_without_body():
+    request = manager_request_for_action({"type": "service.update_comfyui", "payload": {}})
+
+    assert request == {"method": "POST", "path": "/manager/queue/update_comfyui"}
+
+
 def test_manager_update_all_request_uses_default_mode():
     request = manager_request_for_action(
         {"type": "custom_node.update_all", "payload": {}}

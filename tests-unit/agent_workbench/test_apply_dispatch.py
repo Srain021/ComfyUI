@@ -308,6 +308,32 @@ def test_custom_node_switch_version_apply_returns_manager_install_request(tmp_pa
     assert executor.manager_requests[0]["json"]["selected_version"] == "1.2.3"
 
 
+def test_service_update_comfyui_apply_returns_manager_queue_request(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Update ComfyUI",
+            "actions": [{"type": "service.update_comfyui", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"] == {
+        "method": "POST",
+        "path": "/manager/queue/update_comfyui",
+    }
+    assert executor.manager_requests[0]["path"] == "/manager/queue/update_comfyui"
+
+
 def test_service_restart_after_manager_request_is_deferred_until_frontend_completes(tmp_path):
     dry_run = dry_run_plan(
         {

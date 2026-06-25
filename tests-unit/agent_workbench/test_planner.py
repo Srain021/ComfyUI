@@ -2985,6 +2985,15 @@ def test_rule_planner_plans_start_container():
     ]
 
 
+def test_rule_planner_plans_update_comfyui_then_restart():
+    plan = RuleBasedPlanner().plan("更新 ComfyUI 本体然后重启 ComfyUI", context={})
+
+    assert plan["actions"] == [
+        {"type": "service.update_comfyui", "payload": {}},
+        {"type": "service.restart_container", "payload": {"container": "comfyui-gb10"}},
+    ]
+
+
 def test_rule_planner_plans_restore_original_container_config():
     plan = RuleBasedPlanner().plan("回滚到原始 ComfyUI 容器配置", context={})
 

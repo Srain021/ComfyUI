@@ -2205,6 +2205,25 @@ def _with_restart_followup(plan: dict, text: str) -> dict:
     }
 
 
+def _plan_update_comfyui(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_comfyui = "comfyui" in lowered
+    mentions_update = any(term in lowered or term in text for term in ("update", "更新", "升级"))
+    mentions_core = any(
+        term in lowered or term in text
+        for term in ("comfyui 本体", "comfyui core", "comfyui itself", "comfyui 主程序")
+    )
+    if not (mentions_comfyui and mentions_update and mentions_core):
+        return None
+    return _with_restart_followup(
+        {
+            "summary": "Update ComfyUI through ComfyUI-Manager",
+            "actions": [{"type": "service.update_comfyui", "payload": {}}],
+        },
+        text,
+    )
+
+
 def _plan_container_lifecycle(text: str) -> dict | None:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")):
@@ -2753,6 +2772,9 @@ class RuleBasedPlanner:
         custom_node_plan = _plan_custom_node_action(text)
         if custom_node_plan is not None:
             return custom_node_plan
+        update_comfyui_plan = _plan_update_comfyui(text)
+        if update_comfyui_plan is not None:
+            return update_comfyui_plan
         container_lifecycle_plan = _plan_container_lifecycle(text)
         if container_lifecycle_plan is not None:
             return container_lifecycle_plan

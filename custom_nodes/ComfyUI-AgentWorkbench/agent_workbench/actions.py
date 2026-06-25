@@ -47,6 +47,7 @@ ACTION_REGISTRY = {
     "compose.set_reserve_vram": ("service.compose", "service"),
     "compose.set_command_flag": ("service.compose", "service"),
     "service.compose_up": ("service.compose", "service"),
+    "service.update_comfyui": ("service.restart", "service"),
     "service.restart_container": ("service.restart", "service"),
     "service.stop_container": ("service.restart", "service"),
     "service.start_container": ("service.restart", "service"),
@@ -70,6 +71,7 @@ FRONTEND_MEDIATED_ACTIONS = {
     "custom_node.fix",
     "custom_node.uninstall",
     "custom_node.switch_version",
+    "service.update_comfyui",
 }
 SERVER_DEFERABLE_ACTIONS = {
     "workflow.save",
@@ -247,6 +249,10 @@ def _dispatch_action(action: dict, root: Path, executor, browser_workflow: objec
         return {"type": action_type, "http_request": {"path": "/queue", "json": {"clear": True}}}
     if action_type == "runtime.free_memory":
         return {"type": action_type, "http_request": {"path": "/free", "json": payload}}
+    if action_type == "service.update_comfyui":
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
     if action_type.startswith("custom_node."):
         request = manager_request_for_action(action)
         executor.manager_request(request)

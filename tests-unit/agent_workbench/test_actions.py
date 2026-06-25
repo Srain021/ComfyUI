@@ -370,6 +370,7 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
         ("custom_node.fix", {"id": "ComfyUI-TestNode"}, "package"),
         ("custom_node.uninstall", {"id": "ComfyUI-TestNode"}, "package"),
         ("custom_node.switch_version", {"id": "ComfyUI-TestNode", "version": "1.2.3"}, "package"),
+        ("service.update_comfyui", {}, "service"),
         ("service.restart_container", {"container": "comfyui-gb10"}, "service"),
         ("service.stop_container", {"container": "comfyui-gb10"}, "service"),
         ("service.start_container", {"container": "comfyui-gb10"}, "service"),
