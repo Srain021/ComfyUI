@@ -289,7 +289,8 @@ export function applyGraphAction(action, nodeRefs = new Map()) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
     const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
-    const widget = setWidgetValue(node, action.payload.widget, action.payload.value);
+    const widgetName = action.payload.widget ?? action.payload.widget_name;
+    const widget = setWidgetValue(node, widgetName, action.payload.value);
     app.graph.setDirtyCanvas(true, true);
     return { type: action.type, node_id: node.id, widget: widget.name };
   }

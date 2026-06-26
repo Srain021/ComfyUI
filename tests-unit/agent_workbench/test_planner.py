@@ -400,6 +400,52 @@ def test_rule_planner_edits_prompt_then_queues_workflow_at_front():
     ]
 
 
+def test_rule_planner_generates_image_by_updating_positive_prompt_then_queueing():
+    plan = RuleBasedPlanner().plan(
+        "用当前 ComfyUI 工作流生成一个哈士奇的图片 要求帅",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "CLIPTextEncode",
+                        "title": "正向提示词",
+                        "widgets": [{"name": "text", "value": "old positive"}],
+                    },
+                    {
+                        "id": 5,
+                        "type": "CLIPTextEncode",
+                        "title": "负面提示词",
+                        "widgets": [{"name": "text", "value": "old negative"}],
+                    },
+                    {
+                        "id": 6,
+                        "type": "KSampler",
+                        "title": "KSampler",
+                        "inputs": [
+                            {"name": "model", "type": "MODEL"},
+                            {"name": "positive", "type": "CONDITIONING"},
+                            {"name": "negative", "type": "CONDITIONING"},
+                        ],
+                    },
+                ],
+                "links": [
+                    {"origin_id": 4, "origin_slot": 0, "target_id": 6, "target_slot": 1},
+                    {"origin_id": 5, "origin_slot": 0, "target_id": 6, "target_slot": 2},
+                ],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "graph.set_widget",
+            "payload": {"node_id": 4, "widget": "text", "value": "帅气的哈士奇"},
+        },
+        {"type": "runtime.queue_prompt", "payload": {"front": False}},
+    ]
+
+
 def test_rule_planner_sets_selected_prompt_nodes_without_touching_other_selected_nodes():
     plan = RuleBasedPlanner().plan(
         "把选中的 prompt 节点改成 neon skyline",
@@ -2701,6 +2747,39 @@ def test_rule_planner_sets_checkpoint_model_with_use_phrase():
                 "widget": "ckpt_name",
                 "value": "juggernautXL.safetensors",
             },
+        }
+    ]
+
+
+def test_rule_planner_treats_best_available_model_question_as_chat_context():
+    plan = RuleBasedPlanner().plan(
+        "你看看我的设备，我现在能用的最好的模型是什么",
+        context={
+            "graph_input": {
+                "nodes": [
+                    {
+                        "id": 4,
+                        "type": "CheckpointLoaderSimple",
+                        "title": "Checkpoint加载器（简易）",
+                        "widgets": [{"name": "ckpt_name", "value": "ace_step_v1_3.5b.safetensors"}],
+                    },
+                    {
+                        "id": 7,
+                        "type": "CLIPTextEncode",
+                        "title": "CLIP文本编码",
+                        "widgets": [{"name": "text", "value": "text, watermark"}],
+                    },
+                ],
+                "links": [],
+                "node_types": [],
+            }
+        },
+    )
+
+    assert plan["actions"] == [
+        {
+            "type": "context.collect",
+            "payload": {"message": "你看看我的设备，我现在能用的最好的模型是什么"},
         }
     ]
 

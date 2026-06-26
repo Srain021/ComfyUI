@@ -16,6 +16,8 @@ CORE_CAPABILITIES = [
     "service.restart",
     "sudo.print_only",
     "agent.chat",
+    "agent.codex_cli",
+    "agent.tool_planning",
 ]
 
 

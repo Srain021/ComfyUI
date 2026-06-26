@@ -107,6 +107,27 @@ def _extract_value_after_delimiters(text: str, delimiters: tuple[str, ...]) -> s
     return None
 
 
+def _looks_like_question_assignment(text: str, value: str) -> bool:
+    value = _strip_value(value)
+    if not value:
+        return True
+    if any(term in value for term in ("什么", "哪个", "哪一个", "哪些", "多少", "吗", "？")):
+        return True
+    if "?" in value or "?" in text or "？" in text:
+        return True
+    if any(term in text for term in ("推荐", "能用", "可以用", "可用")):
+        return True
+    if "最好" in text and any(term in text for term in ("什么", "哪个", "哪一个", "哪些", "推荐")):
+        return True
+    lowered = text.lower()
+    value_lowered = value.lower()
+    if any(term in value_lowered for term in ("what", "which", "recommend")):
+        return True
+    if any(term in lowered for term in ("what model", "which model", "recommend", "can use")):
+        return True
+    return False
+
+
 def _coerce_widget_value(value: str, widget: dict) -> object:
     current = widget.get("value")
     lowered = value.lower()
@@ -1079,7 +1100,10 @@ def _use_widget_assignment(text: str, node: dict) -> list[tuple[dict, object]]:
     widget = _select_mentioned_widget(node, prefix) or _select_mentioned_widget(node, text)
     if widget is None:
         return []
-    value = _strip_use_assignment_suffix(_use_value_before_followup_assignment(match.group(1), node))
+    raw_value = match.group(1)
+    if _looks_like_question_assignment(text, raw_value):
+        return []
+    value = _strip_use_assignment_suffix(_use_value_before_followup_assignment(raw_value, node))
     if not value:
         return []
     return [(widget, _coerce_widget_value(value, widget))]
@@ -1165,7 +1189,7 @@ def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
         value_end = matches[index + 1]["start"] if index + 1 < len(matches) else len(text)
         raw_value = match["value"] if match["value"] is not None else text[match["value_start"]:value_end]
         value = _strip_value(raw_value)
-        if not value:
+        if not value or _looks_like_question_assignment(text, value):
             continue
         widget = hints[match["hint"]]
         if widget["name"] in seen_widgets:
@@ -1657,6 +1681,116 @@ def _plan_prompt_role_assignments(text: str, context: dict) -> dict | None:
     return {
         "summary": f"Set prompt role widget(s) on {len(actions)} node(s)",
         "actions": actions,
+    }
+
+
+IMAGE_GENERATION_STOP_TERMS = (
+    "停止生成",
+    "中断生成",
+    "终止生成",
+    "取消生成",
+    "stop generation",
+    "cancel generation",
+    "interrupt generation",
+)
+
+IMAGE_GENERATION_PATTERNS = (
+    r"(?:帮我|给我|请|麻烦|用你自己|你自己|直接|现在|我想要|我要)?\s*"
+    r"(?:生成|画|绘制|做|出)\s*(?:一张|一个|一幅|一副|一只|张|个|幅|副|只)?\s*"
+    r"(?P<subject>.+?)(?:的)?(?:图片|图像|照片|图)\s*(?P<tail>.*)$",
+    r"\b(?:generate|draw|create|make)\s+(?:an?|the)?\s*(?P<subject>.+?)\s*"
+    r"(?:image|picture|photo)\s*(?P<tail>.*)$",
+)
+
+
+def _image_generation_prompt(text: str) -> str | None:
+    if not isinstance(text, str):
+        return None
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in IMAGE_GENERATION_STOP_TERMS):
+        return None
+    if any(
+        term in lowered or term in text
+        for term in ("你自己", "你来", "背后的", "背后", "codex", "openai", "chatgpt", "不是comfyui", "不要comfyui", "直接生成")
+    ) and not any(
+        term in lowered or term in text
+        for term in ("当前 comfyui", "当前工作流", "comfyui 工作流", "current workflow")
+    ):
+        return None
+    if not any(term in lowered or term in text for term in ("图片", "图像", "照片", "图", "image", "picture", "photo")):
+        return None
+    if not any(term in lowered or term in text for term in ("生成", "画", "绘制", "做", "出", "generate", "draw", "create", "make")):
+        return None
+
+    for pattern in IMAGE_GENERATION_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match is None:
+            continue
+        subject = _strip_value(match.group("subject"))
+        tail = _strip_value(match.group("tail"))
+        tail = re.sub(r"^(?:要求|要|需要|必须|风格|style|with)\s*", "", tail, flags=re.IGNORECASE)
+        tail = _strip_value(tail)
+        if not subject:
+            continue
+        if tail and re.fullmatch(r"帅(?:气)?(?:一点|一些)?", tail):
+            return subject if "帅" in subject else f"帅气的{subject}"
+        return f"{subject}, {tail}" if tail else subject
+    return None
+
+
+def _positive_prompt_node(nodes: list[dict], links: list[dict]) -> dict | None:
+    linked = _prompt_nodes_by_connection_role(nodes, links, "positive")
+    if len(linked) == 1:
+        return linked[0]
+
+    labelled = []
+    for node in nodes:
+        if not _node_looks_like_prompt_text_node(node):
+            continue
+        label = _node_label(node).lower()
+        if ("positive" in label or "正向" in label or "正面" in label) and not any(
+            term in label for term in ("negative", "负面", "反向", "负向")
+        ):
+            labelled.append(node)
+    if len(labelled) == 1:
+        return labelled[0]
+
+    selected = [node for node in _selected_nodes(nodes) if _node_looks_like_prompt_text_node(node)]
+    if len(selected) == 1:
+        return selected[0]
+
+    generic = [node for node in nodes if _node_looks_like_prompt_text_node(node)]
+    if len(generic) == 1:
+        return generic[0]
+    return None
+
+
+def _plan_image_generation_request(text: str, context: dict) -> dict | None:
+    prompt = _image_generation_prompt(text)
+    if not prompt:
+        return None
+    nodes = _graph_nodes(context)
+    node = _positive_prompt_node(nodes, _graph_links(context))
+    if node is None:
+        return None
+    widget = _select_widget(node, "正向提示词 text")
+    if widget is None:
+        return None
+    lowered = text.lower()
+    front = any(term in lowered or term in text for term in ("插队", "队首", "front"))
+    return {
+        "summary": "Generate image with current ComfyUI workflow",
+        "actions": [
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "widget": widget["name"],
+                    "value": _coerce_widget_value(prompt, widget),
+                },
+            },
+            {"type": "runtime.queue_prompt", "payload": {"front": front}},
+        ],
     }
 
 
@@ -5230,6 +5364,11 @@ class RuleBasedPlanner:
         prompt_role_plan = _plan_prompt_role_assignments(graph_text, context)
         if prompt_role_plan is not None:
             return _combine_with_followup_plans(prompt_role_plan, followup_plans, graph_text, text)
+        image_generation_plan = _plan_image_generation_request(graph_text, context)
+        if image_generation_plan is not None:
+            return _combine_with_followup_plans(
+                image_generation_plan, followup_plans, graph_text, text
+            )
         graph_plan = _plan_graph_widget_edit(graph_text, context)
         if graph_plan is not None:
             return _combine_with_followup_plans(graph_plan, followup_plans, graph_text, text)

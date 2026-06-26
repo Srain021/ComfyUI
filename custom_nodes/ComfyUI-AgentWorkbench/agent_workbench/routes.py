@@ -222,8 +222,6 @@ def register_routes(prompt_server=None) -> None:
                 {"ok": False, "error": str(exc), "raw_plan": raw_plan},
                 status=400,
             )
-        if not _is_context_only_dry_run(dry_run):
-            return web.json_response(dry_run)
         reply = await asyncio.to_thread(
             build_assistant_reply,
             message,
