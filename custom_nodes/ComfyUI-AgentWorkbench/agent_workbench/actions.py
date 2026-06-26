@@ -1,0 +1,378 @@
+import hashlib
+import json
+from copy import deepcopy
+from pathlib import Path
+
+from .executor import DefaultExecutor
+from .ops.commands import PRERENDER_FREE_MEMORY_COMMAND, RESTORE_ORIGINAL_COMMAND
+from .ops.compose import (
+    DEFAULT_COMPOSE_PATH,
+    apply_command_flag,
+    apply_command_value,
+    apply_reserve_vram,
+)
+from .ops.manager import manager_request_for_action
+from .ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
+from .permissions import max_risk, requires_confirmation
+
+
+class PlanValidationError(ValueError):
+    pass
+
+
+ACTION_REGISTRY = {
+    "context.collect": ("context.read", "read"),
+    "graph.set_widget": ("graph.edit", "canvas"),
+    "graph.add_node": ("graph.edit", "canvas"),
+    "graph.connect": ("graph.edit", "canvas"),
+    "graph.disconnect": ("graph.edit", "canvas"),
+    "graph.delete_node": ("graph.edit", "canvas"),
+    "graph.duplicate_node": ("graph.edit", "canvas"),
+    "graph.set_color": ("graph.edit", "canvas"),
+    "graph.set_mode": ("graph.edit", "canvas"),
+    "graph.set_collapsed": ("graph.edit", "canvas"),
+    "graph.set_size": ("graph.edit", "canvas"),
+    "graph.set_title": ("graph.edit", "canvas"),
+    "graph.set_position": ("graph.edit", "canvas"),
+    "graph.select_node": ("graph.edit", "canvas"),
+    "graph.select_nodes": ("graph.edit", "canvas"),
+    "workflow.save": ("workflow.write", "file"),
+    "runtime.queue_prompt": ("runtime.queue", "runtime"),
+    "runtime.clear_queue": ("runtime.queue", "runtime"),
+    "runtime.interrupt": ("runtime.interrupt", "runtime"),
+    "runtime.free_memory": ("runtime.free_memory", "runtime"),
+    "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),
+    "manager.queue_status": ("context.read", "read"),
+    "manager.queue_start": ("custom_node.manage", "package"),
+    "manager.queue_reset": ("custom_node.manage", "package"),
+    "model.install": ("model.manage", "package"),
+    "custom_node.list": ("context.read", "read"),
+    "custom_node.search": ("context.read", "read"),
+    "custom_node.install": ("custom_node.manage", "package"),
+    "custom_node.disable": ("custom_node.manage", "package"),
+    "custom_node.enable": ("custom_node.manage", "package"),
+    "custom_node.update": ("custom_node.manage", "package"),
+    "custom_node.update_all": ("custom_node.manage", "package"),
+    "custom_node.reinstall": ("custom_node.manage", "package"),
+    "custom_node.fix": ("custom_node.manage", "package"),
+    "custom_node.uninstall": ("custom_node.manage", "package"),
+    "custom_node.switch_version": ("custom_node.manage", "package"),
+    "compose.set_reserve_vram": ("service.compose", "service"),
+    "compose.set_command_flag": ("service.compose", "service"),
+    "compose.set_command_value": ("service.compose", "service"),
+    "service.compose_up": ("service.compose", "service"),
+    "service.update_comfyui": ("service.restart", "service"),
+    "service.restart_container": ("service.restart", "service"),
+    "service.stop_container": ("service.restart", "service"),
+    "service.start_container": ("service.restart", "service"),
+    "service.prerender_free_memory": ("service.restart", "service"),
+    "service.restore_original": ("service.restart", "service"),
+    "service.healthcheck": ("context.read", "read"),
+    "service.logs": ("context.read", "read"),
+    "sudo.print_command": ("sudo.print_only", "human_sudo"),
+}
+
+FRONTEND_MEDIATED_ACTIONS = {
+    "runtime.queue_prompt",
+    "runtime.clear_queue",
+    "runtime.interrupt",
+    "runtime.free_memory",
+    "manager.queue_status",
+    "manager.queue_start",
+    "manager.queue_reset",
+    "model.install",
+    "custom_node.list",
+    "custom_node.search",
+    "custom_node.install",
+    "custom_node.disable",
+    "custom_node.enable",
+    "custom_node.update",
+    "custom_node.update_all",
+    "custom_node.reinstall",
+    "custom_node.fix",
+    "custom_node.uninstall",
+    "custom_node.switch_version",
+    "service.update_comfyui",
+}
+SERVER_DEFERABLE_ACTIONS = {
+    "workflow.save",
+    "compose.set_reserve_vram",
+    "compose.set_command_flag",
+    "compose.set_command_value",
+    "service.compose_up",
+    "service.restart_container",
+    "service.stop_container",
+    "service.start_container",
+    "service.prerender_free_memory",
+    "service.restore_original",
+    "runtime.stop_ollama_model",
+}
+
+
+def _normalize_action(action: object, index: int) -> dict:
+    if not isinstance(action, dict):
+        raise PlanValidationError(f"Action {index} must be an object")
+    action_type = action.get("type")
+    if not isinstance(action_type, str):
+        raise PlanValidationError(f"Action {index} type must be a string")
+    if action_type not in ACTION_REGISTRY:
+        raise PlanValidationError(f"Unsupported action type: {action_type} (action {index})")
+    payload = action.get("payload", {})
+    if not isinstance(payload, dict):
+        raise PlanValidationError(f"Action {index} payload must be an object: {action_type}")
+    capability, risk = ACTION_REGISTRY[action_type]
+    return {
+        "type": action_type,
+        "payload": deepcopy(payload),
+        "capability": capability,
+        "risk_level": risk,
+    }
+
+
+def validate_plan(raw: dict) -> dict:
+    if not isinstance(raw, dict):
+        raise PlanValidationError("Plan must be an object")
+    summary = raw.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise PlanValidationError("Plan summary must be a non-empty string")
+    raw_actions = raw.get("actions")
+    if not isinstance(raw_actions, list) or not raw_actions:
+        raise PlanValidationError("Plan actions must be a non-empty list")
+
+    actions = [_normalize_action(action, index) for index, action in enumerate(raw_actions)]
+    risk_level = "read"
+    capabilities = []
+    for action in actions:
+        risk_level = max_risk(risk_level, action["risk_level"])
+        if action["capability"] not in capabilities:
+            capabilities.append(action["capability"])
+
+    plan = {
+        "summary": summary.strip(),
+        "actions": actions,
+        "risk_level": risk_level,
+        "required_capabilities": capabilities,
+        "requires_confirmation": requires_confirmation(risk_level),
+    }
+    plan["plan_hash"] = stable_plan_hash(plan)
+    return plan
+
+
+def stable_plan_hash(plan: dict) -> str:
+    copy = deepcopy(plan)
+    copy.pop("plan_hash", None)
+    copy.pop("confirmed", None)
+    payload = json.dumps(copy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def dry_run_plan(raw: dict) -> dict:
+    plan = validate_plan(raw)
+    preview = [
+        {
+            "type": action["type"],
+            "capability": action["capability"],
+            "risk_level": action["risk_level"],
+            "payload": action["payload"],
+        }
+        for action in plan["actions"]
+    ]
+    return {"status": "dry_run", "plan": plan, "preview": preview}
+
+
+def _agent_backup_dir(root: Path) -> Path:
+    return root / "user" / "default" / "agent_workbench" / "backups"
+
+
+def _required_payload(payload: dict, key: str, action_type: str) -> object:
+    if key not in payload:
+        raise PlanValidationError(f"{action_type} payload requires {key}")
+    return payload[key]
+
+
+def _run_healthcheck(executor) -> list[dict]:
+    commands = [
+        ["docker", "ps", "-a", "--filter", "name=comfyui-gb10"],
+        ["docker", "logs", "--tail", "80", "comfyui-gb10"],
+        ["curl", "-sS", "--fail", "http://127.0.0.1:8188/system_stats"],
+        ["free", "-h"],
+    ]
+    return [executor.run_command(command) for command in commands]
+
+
+def _workflow_payload_for_save(payload: dict, action_type: str, browser_workflow: object) -> object:
+    if "workflow" in payload:
+        return payload["workflow"]
+    if payload.get("workflow_from_browser") is True:
+        if not isinstance(browser_workflow, dict):
+            raise PlanValidationError(f"{action_type} requires browser_workflow")
+        return browser_workflow
+    return _required_payload(payload, "workflow", action_type)
+
+
+def _dispatch_action(action: dict, root: Path, executor, browser_workflow: object = None) -> dict:
+    action_type = action["type"]
+    payload = action.get("payload", {})
+    if action_type.startswith("graph."):
+        return {"type": action_type, "browser_required": True, "payload": payload}
+    if action_type == "runtime.queue_prompt":
+        return {"type": action_type, "browser_required": True, "payload": payload}
+    if action_type == "context.collect":
+        return {"type": action_type, "applied": False, "reason": "context action is read-only"}
+    if action_type == "service.healthcheck":
+        return {"type": action_type, "commands": _run_healthcheck(executor)}
+    if action_type == "service.logs":
+        return {
+            "type": action_type,
+            "command": executor.run_command(["docker", "logs", "--tail", "80", "comfyui-gb10"]),
+        }
+    if action_type == "workflow.save":
+        path = str(_required_payload(payload, "path", action_type))
+        workflow = _workflow_payload_for_save(payload, action_type, browser_workflow)
+        target = resolve_workflow_path(root, path)
+        result = save_workflow_with_snapshot(target, workflow, _agent_backup_dir(root))
+        return {"type": action_type, "workflow": result}
+    if action_type == "compose.set_reserve_vram":
+        value = str(_required_payload(payload, "value", action_type))
+        compose_path = root / DEFAULT_COMPOSE_PATH
+        result = apply_reserve_vram(compose_path, value, _agent_backup_dir(root))
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "compose.set_command_flag":
+        flag = str(_required_payload(payload, "flag", action_type))
+        enabled = _required_payload(payload, "enabled", action_type) is True
+        compose_path = root / DEFAULT_COMPOSE_PATH
+        result = apply_command_flag(compose_path, flag, enabled, _agent_backup_dir(root))
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "compose.set_command_value":
+        flag = str(_required_payload(payload, "flag", action_type))
+        value = str(_required_payload(payload, "value", action_type))
+        compose_path = root / DEFAULT_COMPOSE_PATH
+        result = apply_command_value(compose_path, flag, value, _agent_backup_dir(root))
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "service.compose_up":
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "command": command_result}
+    if action_type == "service.restart_container":
+        container = payload.get("container", "comfyui-gb10")
+        return {"type": action_type, "command": executor.run_command(["docker", "restart", container])}
+    if action_type == "service.stop_container":
+        container = payload.get("container", "comfyui-gb10")
+        return {"type": action_type, "command": executor.run_command(["docker", "stop", container])}
+    if action_type == "service.start_container":
+        container = payload.get("container", "comfyui-gb10")
+        return {"type": action_type, "command": executor.run_command(["docker", "start", container])}
+    if action_type == "service.prerender_free_memory":
+        return {"type": action_type, "command": executor.run_command(PRERENDER_FREE_MEMORY_COMMAND)}
+    if action_type == "service.restore_original":
+        return {"type": action_type, "command": executor.run_command(RESTORE_ORIGINAL_COMMAND)}
+    if action_type == "runtime.stop_ollama_model":
+        model = str(_required_payload(payload, "model", action_type))
+        return {"type": action_type, "command": executor.run_command(["ollama", "stop", model])}
+    if action_type == "runtime.interrupt":
+        return {"type": action_type, "http_request": {"path": "/interrupt", "json": payload}}
+    if action_type == "runtime.clear_queue":
+        return {"type": action_type, "http_request": {"path": "/queue", "json": {"clear": True}}}
+    if action_type == "runtime.free_memory":
+        return {"type": action_type, "http_request": {"path": "/free", "json": payload}}
+    if action_type in {"manager.queue_status", "manager.queue_start", "manager.queue_reset"}:
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
+    if action_type == "service.update_comfyui":
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
+    if action_type == "model.install":
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
+    if action_type.startswith("custom_node."):
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
+    if action_type == "sudo.print_command":
+        command = str(_required_payload(payload, "command", action_type))
+        return {"type": action_type, "command": command, "executed": False}
+    raise PlanValidationError(f"No dispatcher for action type: {action_type}")
+
+
+def _is_frontend_mediated_action(action: dict) -> bool:
+    action_type = action["type"]
+    return action_type.startswith("graph.") or action_type in FRONTEND_MEDIATED_ACTIONS
+
+
+def _deferred_action(action: dict, index: int) -> dict:
+    return {"type": action["type"], "deferred": True, "action_index": index}
+
+
+def apply_plan(
+    raw_plan: dict,
+    approved_hash: str,
+    root: Path | None = None,
+    executor=None,
+    browser_workflow: object = None,
+) -> dict:
+    root = root or Path.cwd()
+    executor = executor or DefaultExecutor()
+    confirmed = isinstance(raw_plan, dict) and raw_plan.get("confirmed") is True
+    plan = validate_plan(raw_plan)
+    expected_hash = stable_plan_hash(plan)
+    if approved_hash != expected_hash:
+        return {"ok": False, "error": "approved_hash_mismatch", "expected_hash": expected_hash}
+    if plan.get("requires_confirmation") and not confirmed:
+        return {"ok": False, "error": "confirmation_required"}
+    try:
+        applied = []
+        frontend_barrier_seen = False
+        for index, action in enumerate(plan["actions"]):
+            if frontend_barrier_seen and action["type"] in SERVER_DEFERABLE_ACTIONS:
+                applied.append(_deferred_action(action, index))
+                continue
+            applied.append(_dispatch_action(action, root, executor, browser_workflow=browser_workflow))
+            if _is_frontend_mediated_action(action):
+                frontend_barrier_seen = True
+    except (OSError, ValueError) as exc:
+        raise PlanValidationError(str(exc)) from exc
+    return {"ok": True, "status": "applied", "applied": applied}
+
+
+def apply_deferred_action(
+    raw_plan: dict,
+    approved_hash: str,
+    action_index: int,
+    root: Path | None = None,
+    executor=None,
+    browser_workflow: object = None,
+) -> dict:
+    root = root or Path.cwd()
+    executor = executor or DefaultExecutor()
+    confirmed = isinstance(raw_plan, dict) and raw_plan.get("confirmed") is True
+    plan = validate_plan(raw_plan)
+    expected_hash = stable_plan_hash(plan)
+    if approved_hash != expected_hash:
+        return {"ok": False, "error": "approved_hash_mismatch", "expected_hash": expected_hash}
+    if plan.get("requires_confirmation") and not confirmed:
+        return {"ok": False, "error": "confirmation_required"}
+    if not isinstance(action_index, int) or action_index < 0 or action_index >= len(plan["actions"]):
+        return {"ok": False, "error": "invalid_deferred_action_index"}
+    action = plan["actions"][action_index]
+    if action["type"] not in SERVER_DEFERABLE_ACTIONS:
+        return {"ok": False, "error": "action_is_not_deferable"}
+    if not any(_is_frontend_mediated_action(item) for item in plan["actions"][:action_index]):
+        return {"ok": False, "error": "deferred_action_has_no_frontend_prerequisite"}
+    try:
+        applied = _dispatch_action(action, root, executor, browser_workflow=browser_workflow)
+    except (OSError, ValueError) as exc:
+        raise PlanValidationError(str(exc)) from exc
+    return {"ok": True, "status": "applied", "applied": applied}

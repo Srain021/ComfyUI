@@ -1,0 +1,58 @@
+# ComfyUI on DGX Spark (GB10) — 永久修复版容器定义
+# 取代原来的一次性 `docker run`。原始配置已备份在 backup/comfyui-gb10.inspect.json
+# 改动: ① 健康检查指向真正的 ComfyUI(原来查 vLLM 的 8888 → 永远 unhealthy)
+#       ② 永久内存修复: --disable-cuda-malloc + expandable_segments → /free 真能回收, 不再卡几十 GB
+#       ③ restart: unless-stopped → 开机/崩溃自愈
+#       ④ 焊死 GB10 必需 flag(--disable-pinned-memory 等)
+# 管理: docker compose -f docker-compose.yml up -d   /   down   /   restart
+services:
+  comfyui-gb10:
+    image: avarok/vllm-dgx-spark:latest
+    container_name: comfyui-gb10
+    working_dir: /workspace/ComfyUI
+    entrypoint: ["python3"]
+    command:
+      - main.py
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8188"
+      - --disable-auto-launch
+      - --log-stdout
+      # ↓↓↓ 永久修复 / GB10 必需(新增) ↓↓↓
+      - --disable-cuda-malloc          # 改用原生分配器, 配合下方 expandable_segments 才能真正归还内存
+      - --disable-pinned-memory        # Blackwell 必需(cudaHostRegister 否则失败)
+      - --use-pytorch-cross-attention  # SDPA, sm_121 零编译安全默认
+      - --reserve-vram
+      - "8"                            # 给 Ollama / 系统留 8GB 余量
+    environment:
+      PYTHONPATH: /workspace/ComfyUI/.python-packages   # 关键: ComfyUI 的依赖在挂载卷里, 必须保留
+      PYTORCH_ALLOC_CONF: "expandable_segments:True"     # 让原生分配器把内存还给系统(核心修复)
+      CUDA_CACHE_MAXSIZE: "4294967296"                  # 4GB kernel 缓存 → 热运行 ~3x 提速
+      TORCHDYNAMO_DISABLE: "1"                           # sm_121 无可用 Triton, 关掉 compile
+      AGENT_WORKBENCH_LLM_ENDPOINT: "http://172.17.0.1:8797/v1/responses"  # 宿主 Codex OAuth bridge
+      AGENT_WORKBENCH_LLM_MODEL: "gpt-5.5"
+      AGENT_WORKBENCH_LLM_TIMEOUT: "180"
+    ports:
+      - "0.0.0.0:8188:8188"
+    volumes:
+      - /home/srain/ComfyUI:/workspace/ComfyUI
+      # Agent Workbench ops: expose host Docker only for whitelisted backend commands.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/local/bin/docker:ro
+      - /usr/libexec/docker/cli-plugins:/usr/local/lib/docker/cli-plugins:ro
+    restart: unless-stopped
+    shm_size: "2gb"                                     # 原仅 64MB, 给点余量
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8188/system_stats || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
