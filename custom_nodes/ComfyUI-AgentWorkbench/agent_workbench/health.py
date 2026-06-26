@@ -1,4 +1,5 @@
 from . import VERSION
+from .llm import llm_status
 
 
 CORE_CAPABILITIES = [
@@ -9,10 +10,12 @@ CORE_CAPABILITIES = [
     "runtime.queue",
     "runtime.interrupt",
     "runtime.free_memory",
+    "model.manage",
     "custom_node.manage",
     "service.compose",
     "service.restart",
     "sudo.print_only",
+    "agent.chat",
 ]
 
 
@@ -23,4 +26,5 @@ def build_health_payload() -> dict:
         "version": VERSION,
         "capabilities": list(CORE_CAPABILITIES),
         "sudo_policy": "print_only",
+        "llm": llm_status(),
     }

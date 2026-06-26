@@ -251,6 +251,41 @@ def test_register_routes_adds_agent_context_post_route():
         agent_routes._REGISTERED = False
 
 
+def test_register_routes_adds_smoke_manifest_get_route_for_windows_manual_checks():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("GET", "/agent/smoke_manifest")].handler(_FakeRequest())
+        )
+        payload = json.loads(response.text)
+
+        assert payload["ok"] is True
+        assert payload["surface"] == "windows_browser"
+        assert [step["id"] for step in payload["manual_steps"]][:5] == [
+            "context",
+            "plan_prompt_edit",
+            "confirm_elevated",
+            "cancel_plan",
+            "apply_prompt_edit",
+        ]
+        assert payload["sample_prompts"]["prompt_edit"] == "把这个 prompt 节点的文本更新成 glowing blue forest"
+        assert payload["sample_prompts"]["custom_node_restart"] == "安装当前工作流缺失节点然后重启 ComfyUI"
+        assert payload["sample_prompts"]["print_sudo"] == "关 swap 防止卡死"
+    finally:
+        agent_routes._REGISTERED = False
+
+
 def test_register_routes_adds_dry_run_and_apply_routes():
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
@@ -526,6 +561,134 @@ def test_register_routes_adds_agent_plan_route():
         agent_routes._REGISTERED = False
 
 
+def test_agent_message_route_returns_plan_for_actionable_prompt():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(decoded_body={"message": "释放内存", "graph": {"nodes": []}})
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"][0]["type"] == "runtime.free_memory"
+        assert payload["plan"]["requires_confirmation"] is True
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_message_route_returns_ai_status_for_conversation(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_LLM_ENDPOINT", raising=False)
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "介绍一下你自己",
+                        "graph": {"nodes": [{"id": 1, "type": "KSampler"}]},
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "ai_unavailable"
+        assert payload["ok"] is False
+        assert "Codex" in payload["assistant"]["message"]
+        assert payload["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_message_route_passes_history_and_attachments_to_llm(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_build_assistant_reply(message, context, dry_run, history=None, attachments=None):
+        calls.append(
+            {
+                "message": message,
+                "history": history,
+                "attachments": attachments,
+                "dry_run": dry_run,
+                "context": context,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "assistant_reply",
+            "assistant": {"title": "ComfyUI Codex Agent", "message": "我看到了附件。"},
+        }
+
+    monkeypatch.setattr(agent_routes, "build_assistant_reply", fake_build_assistant_reply)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "描述这张图",
+                        "graph": {"nodes": [{"id": 1, "type": "KSampler"}]},
+                        "history": [{"role": "user", "text": "上一轮"}],
+                        "attachments": [
+                            {
+                                "kind": "image",
+                                "name": "workflow.png",
+                                "mime": "image/png",
+                                "data_url": "data:image/png;base64,aW1n",
+                            }
+                        ],
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "assistant_reply"
+        assert calls[0]["message"] == "描述这张图"
+        assert calls[0]["history"] == [{"role": "user", "text": "上一轮"}]
+        assert calls[0]["attachments"][0]["name"] == "workflow.png"
+        assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+    finally:
+        agent_routes._REGISTERED = False
+
+
 def test_agent_plan_route_passes_graph_snapshot_to_planner():
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
@@ -571,6 +734,121 @@ def test_agent_plan_route_passes_graph_snapshot_to_planner():
             "value": "cinematic lighting",
         }
         assert payload["plan"]["requires_confirmation"] is False
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_plan_route_preserves_registered_node_types_for_planner():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/plan")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "添加一个 Save Image 节点",
+                        "graph": {
+                            "nodes": [],
+                            "links": [],
+                            "node_types": [{"type": "SaveImage", "title": "Save Image"}],
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"][0]["type"] == "graph.add_node"
+        assert payload["plan"]["actions"][0]["payload"] == {"node_type": "SaveImage"}
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_plan_route_preserves_registered_node_type_outputs_for_new_node_connections():
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/plan")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "添加一个正向提示词节点，内容写成 neon skyline，并把它接到 KSampler 的 positive",
+                        "graph": {
+                            "nodes": [
+                                {
+                                    "id": 9,
+                                    "type": "KSampler",
+                                    "title": "KSampler",
+                                    "inputs": [
+                                        {"name": "model", "type": "MODEL"},
+                                        {"name": "positive", "type": "CONDITIONING"},
+                                        {"name": "negative", "type": "CONDITIONING"},
+                                    ],
+                                }
+                            ],
+                            "links": [],
+                            "node_types": [
+                                {
+                                    "type": "CLIPTextEncode",
+                                    "title": "CLIP Text Encode",
+                                    "outputs": [
+                                        {"name": "CONDITIONING", "type": "CONDITIONING"}
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "dry_run"
+        assert payload["plan"]["actions"] == [
+            {
+                "type": "graph.add_node",
+                "payload": {
+                    "node_type": "CLIPTextEncode",
+                    "title": "Positive Prompt",
+                    "widgets": {"text": "neon skyline"},
+                    "ref": "new_node",
+                },
+                "capability": "graph.edit",
+                "risk_level": "canvas",
+            },
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_ref": "new_node",
+                    "origin_slot": 0,
+                    "target_node_id": 9,
+                    "target_slot": 1,
+                },
+                "capability": "graph.edit",
+                "risk_level": "canvas",
+            },
+        ]
     finally:
         agent_routes._REGISTERED = False
 

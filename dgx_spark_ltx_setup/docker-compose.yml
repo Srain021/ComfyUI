@@ -30,6 +30,9 @@ services:
       PYTORCH_ALLOC_CONF: "expandable_segments:True"     # 让原生分配器把内存还给系统(核心修复)
       CUDA_CACHE_MAXSIZE: "4294967296"                  # 4GB kernel 缓存 → 热运行 ~3x 提速
       TORCHDYNAMO_DISABLE: "1"                           # sm_121 无可用 Triton, 关掉 compile
+      AGENT_WORKBENCH_LLM_ENDPOINT: "http://172.17.0.1:8797/v1/responses"  # 宿主 Codex OAuth bridge
+      AGENT_WORKBENCH_LLM_MODEL: "gpt-5.5"
+      AGENT_WORKBENCH_LLM_TIMEOUT: "180"
     ports:
       - "0.0.0.0:8188:8188"
     volumes:

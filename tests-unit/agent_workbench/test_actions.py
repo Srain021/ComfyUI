@@ -38,6 +38,32 @@ def test_validate_plan_assigns_capabilities_and_hash_is_stable():
     assert plan["plan_hash"] == stable_plan_hash(plan)
 
 
+def test_graph_collapsed_action_is_canvas_risk():
+    plan = validate_plan(
+        {
+            "summary": "Collapse a graph node",
+            "actions": [{"type": "graph.set_collapsed", "payload": {"node_id": 12, "collapsed": True}}],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
+def test_graph_size_action_is_canvas_risk():
+    plan = validate_plan(
+        {
+            "summary": "Resize a graph node",
+            "actions": [{"type": "graph.set_size", "payload": {"node_id": 12, "size": [420, 260]}}],
+        }
+    )
+
+    assert plan["risk_level"] == "canvas"
+    assert plan["required_capabilities"] == ["graph.edit"]
+    assert plan["requires_confirmation"] is False
+
+
 @pytest.mark.parametrize(
     ("actions", "match"),
     [
@@ -86,6 +112,24 @@ def test_compose_up_action_requires_explicit_approval():
         {
             "summary": "Apply compose config",
             "actions": [{"type": "service.compose_up", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "service"
+    assert plan["required_capabilities"] == ["service.compose"]
+    assert plan["requires_confirmation"] is True
+
+
+def test_compose_command_value_action_requires_explicit_approval():
+    plan = validate_plan(
+        {
+            "summary": "Set compose command value",
+            "actions": [
+                {
+                    "type": "compose.set_command_value",
+                    "payload": {"flag": "--reserve-vram", "value": "12"},
+                }
+            ],
         }
     )
 
@@ -147,6 +191,84 @@ def test_service_healthcheck_is_read_only_without_extra_confirmation():
     assert plan["risk_level"] == "read"
     assert plan["required_capabilities"] == ["context.read"]
     assert plan["requires_confirmation"] is False
+
+
+def test_service_logs_is_read_only_without_extra_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Read ComfyUI logs",
+            "actions": [{"type": "service.logs", "payload": {"container": "comfyui-gb10", "tail": 80}}],
+        }
+    )
+
+    assert plan["risk_level"] == "read"
+    assert plan["required_capabilities"] == ["context.read"]
+    assert plan["requires_confirmation"] is False
+
+
+def test_manager_queue_status_is_read_only_without_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Check Manager queue status",
+            "actions": [{"type": "manager.queue_status", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "read"
+    assert plan["required_capabilities"] == ["context.read"]
+    assert plan["requires_confirmation"] is False
+
+
+def test_custom_node_list_is_read_only_without_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "List installed custom nodes",
+            "actions": [{"type": "custom_node.list", "payload": {"scope": "installed"}}],
+        }
+    )
+
+    assert plan["risk_level"] == "read"
+    assert plan["required_capabilities"] == ["context.read"]
+    assert plan["requires_confirmation"] is False
+
+
+def test_custom_node_search_is_read_only_without_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Search custom nodes",
+            "actions": [{"type": "custom_node.search", "payload": {"query": "Impact Pack"}}],
+        }
+    )
+
+    assert plan["risk_level"] == "read"
+    assert plan["required_capabilities"] == ["context.read"]
+    assert plan["requires_confirmation"] is False
+
+
+def test_manager_queue_start_requires_package_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Start Manager queue",
+            "actions": [{"type": "manager.queue_start", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "package"
+    assert plan["required_capabilities"] == ["custom_node.manage"]
+    assert plan["requires_confirmation"] is True
+
+
+def test_manager_queue_reset_requires_package_confirmation():
+    plan = validate_plan(
+        {
+            "summary": "Reset Manager queue",
+            "actions": [{"type": "manager.queue_reset", "payload": {}}],
+        }
+    )
+
+    assert plan["risk_level"] == "package"
+    assert plan["required_capabilities"] == ["custom_node.manage"]
+    assert plan["requires_confirmation"] is True
 
 
 def test_graph_delete_node_is_canvas_edit_without_extra_confirmation():
@@ -364,6 +486,7 @@ def test_stable_plan_hash_changes_when_nested_payload_changes():
         ("runtime.interrupt", {}, "runtime"),
         ("workflow.save", {"path": "workflow.json"}, "file"),
         ("custom_node.install", {"repo": "example/custom-node"}, "package"),
+        ("model.install", {"model": {"url": "https://example.com/model.safetensors"}}, "package"),
         ("custom_node.update", {"id": "ComfyUI-TestNode"}, "package"),
         ("custom_node.update_all", {}, "package"),
         ("custom_node.reinstall", {"id": "ComfyUI-TestNode"}, "package"),

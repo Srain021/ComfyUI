@@ -6,6 +6,7 @@ CAPABILITY_LEVELS = {
     "runtime.interrupt": 2,
     "runtime.free_memory": 2,
     "workflow.write": 3,
+    "model.manage": 4,
     "custom_node.manage": 4,
     "service.compose": 5,
     "service.restart": 5,

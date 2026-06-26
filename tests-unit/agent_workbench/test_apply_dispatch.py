@@ -95,6 +95,45 @@ def test_apply_dispatches_confirmed_compose_command_flag_change(tmp_path):
     ]
 
 
+def test_apply_dispatches_confirmed_compose_command_value_change(tmp_path):
+    compose_path = tmp_path / "dgx_spark_ltx_setup" / "docker-compose.yml"
+    compose_path.parent.mkdir(parents=True)
+    compose_path.write_text(COMPOSE_TEXT, encoding="utf-8")
+    dry_run = dry_run_plan(
+        {
+            "summary": "Set reserve vram",
+            "actions": [
+                {
+                    "type": "compose.set_command_value",
+                    "payload": {"flag": "--reserve-vram", "value": "12"},
+                }
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "compose.set_command_value"
+    assert "- \"12\"  # keep this comment" in compose_path.read_text(encoding="utf-8")
+    assert executor.commands[-1] == [
+        "docker",
+        "compose",
+        "-f",
+        "dgx_spark_ltx_setup/docker-compose.yml",
+        "up",
+        "-d",
+    ]
+
+
 def test_apply_dispatches_confirmed_compose_up(tmp_path):
     dry_run = dry_run_plan(
         {
@@ -229,6 +268,27 @@ def test_apply_dispatches_service_healthcheck_without_confirmation(tmp_path):
     ]
 
 
+def test_apply_dispatches_service_logs_without_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Read ComfyUI logs",
+            "actions": [{"type": "service.logs", "payload": {"container": "comfyui-gb10", "tail": 80}}],
+        }
+    )
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        dry_run["plan"],
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["type"] == "service.logs"
+    assert executor.commands == [["docker", "logs", "--tail", "80", "comfyui-gb10"]]
+
+
 def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_path):
     dry_run = dry_run_plan(
         {
@@ -255,6 +315,166 @@ def test_custom_node_apply_returns_manager_request_for_frontend_execution(tmp_pa
     assert result["ok"] is True
     assert result["applied"][0]["manager_request"]["path"] == "/customnode/install/git_url"
     assert executor.manager_requests[0]["body"] == "https://example.com/node.git"
+
+
+def test_model_install_apply_returns_manager_queue_request(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Install model",
+            "actions": [
+                {
+                    "type": "model.install",
+                    "payload": {
+                        "model": {
+                            "name": "hero.safetensors",
+                            "type": "checkpoints",
+                            "base": "SDXL",
+                            "save_path": "checkpoints",
+                            "url": "https://example.com/models/hero.safetensors",
+                            "filename": "hero.safetensors",
+                            "ui_id": "hero.safetensors",
+                        }
+                    },
+                }
+            ],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"]["path"] == "/manager/queue/install_model"
+    assert executor.manager_requests[0]["json"]["filename"] == "hero.safetensors"
+
+
+def test_manager_queue_status_apply_returns_get_request_without_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Check Manager queue status",
+            "actions": [{"type": "manager.queue_status", "payload": {}}],
+        }
+    )
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        dry_run["plan"],
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"] == {
+        "method": "GET",
+        "path": "/manager/queue/status",
+    }
+    assert executor.manager_requests[0]["path"] == "/manager/queue/status"
+
+
+def test_custom_node_list_apply_returns_get_request_without_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "List installed custom nodes",
+            "actions": [{"type": "custom_node.list", "payload": {"scope": "installed"}}],
+        }
+    )
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        dry_run["plan"],
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"]["method"] == "GET"
+    assert result["applied"][0]["manager_request"]["path"] == "/customnode/installed"
+    assert result["applied"][0]["manager_request"]["response_filter"]["type"] == "custom_node.list"
+    assert executor.manager_requests[0]["path"] == "/customnode/installed"
+
+
+def test_custom_node_search_apply_returns_get_request_without_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Search custom nodes",
+            "actions": [{"type": "custom_node.search", "payload": {"query": "Impact Pack"}}],
+        }
+    )
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        dry_run["plan"],
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"]["method"] == "GET"
+    assert result["applied"][0]["manager_request"]["path"] == "/customnode/getlist?mode=default&skip_update=true"
+    assert result["applied"][0]["manager_request"]["response_filter"]["query"] == "Impact Pack"
+    assert executor.manager_requests[0]["response_filter"]["type"] == "custom_node.search"
+
+
+def test_manager_queue_start_apply_returns_post_request_with_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Start Manager queue",
+            "actions": [{"type": "manager.queue_start", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"] == {
+        "method": "POST",
+        "path": "/manager/queue/start",
+    }
+    assert executor.manager_requests[0]["path"] == "/manager/queue/start"
+
+
+def test_manager_queue_reset_apply_returns_post_request_with_confirmation(tmp_path):
+    dry_run = dry_run_plan(
+        {
+            "summary": "Reset Manager queue",
+            "actions": [{"type": "manager.queue_reset", "payload": {}}],
+        }
+    )
+    plan = dict(dry_run["plan"])
+    plan["confirmed"] = True
+    executor = RecordingExecutor()
+
+    result = apply_plan(
+        plan,
+        approved_hash=dry_run["plan"]["plan_hash"],
+        root=tmp_path,
+        executor=executor,
+    )
+
+    assert result["ok"] is True
+    assert result["applied"][0]["manager_request"] == {
+        "method": "POST",
+        "path": "/manager/queue/reset",
+    }
+    assert executor.manager_requests[0]["path"] == "/manager/queue/reset"
 
 
 def test_custom_node_uninstall_apply_returns_manager_queue_request(tmp_path):
@@ -330,6 +550,7 @@ def test_service_update_comfyui_apply_returns_manager_queue_request(tmp_path):
     assert result["applied"][0]["manager_request"] == {
         "method": "POST",
         "path": "/manager/queue/update_comfyui",
+        "start_queue": True,
     }
     assert executor.manager_requests[0]["path"] == "/manager/queue/update_comfyui"
 

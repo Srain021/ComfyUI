@@ -105,7 +105,11 @@ def test_manager_switch_version_request_uses_queue_install_with_selected_version
 def test_manager_update_comfyui_request_uses_queue_update_comfyui_without_body():
     request = manager_request_for_action({"type": "service.update_comfyui", "payload": {}})
 
-    assert request == {"method": "POST", "path": "/manager/queue/update_comfyui"}
+    assert request == {
+        "method": "POST",
+        "path": "/manager/queue/update_comfyui",
+        "start_queue": True,
+    }
 
 
 def test_manager_update_all_request_uses_default_mode():
@@ -116,6 +120,7 @@ def test_manager_update_all_request_uses_default_mode():
     assert request == {
         "method": "POST",
         "path": "/manager/queue/update_all",
+        "start_queue": True,
         "json": {"mode": "default"},
     }
 
@@ -151,6 +156,7 @@ def test_manager_queue_install_request_uses_node_payload():
     assert request == {
         "method": "POST",
         "path": "/manager/queue/install",
+        "start_queue": True,
         "json": {
             "id": "ComfyUI-Impact-Pack",
             "version": "unknown",
@@ -160,6 +166,101 @@ def test_manager_queue_install_request_uses_node_payload():
             "mode": "cache",
         },
     }
+
+
+def test_manager_model_install_request_uses_queue_install_model():
+    request = manager_request_for_action(
+        {
+            "type": "model.install",
+            "payload": {
+                "model": {
+                    "name": "hero.safetensors",
+                    "type": "checkpoints",
+                    "base": "SDXL",
+                    "save_path": "checkpoints",
+                    "url": "https://example.com/models/hero.safetensors",
+                    "filename": "hero.safetensors",
+                    "ui_id": "hero.safetensors",
+                }
+            },
+        }
+    )
+
+    assert request == {
+        "method": "POST",
+        "path": "/manager/queue/install_model",
+        "start_queue": True,
+        "json": {
+            "name": "hero.safetensors",
+            "type": "checkpoints",
+            "base": "SDXL",
+            "save_path": "checkpoints",
+            "url": "https://example.com/models/hero.safetensors",
+            "filename": "hero.safetensors",
+            "ui_id": "hero.safetensors",
+        },
+    }
+
+
+def test_manager_queue_status_request_does_not_start_queue():
+    request = manager_request_for_action({"type": "manager.queue_status", "payload": {}})
+
+    assert request == {"method": "GET", "path": "/manager/queue/status"}
+
+
+def test_manager_custom_node_list_request_uses_installed_endpoint():
+    request = manager_request_for_action(
+        {"type": "custom_node.list", "payload": {"scope": "installed"}}
+    )
+
+    assert request == {
+        "method": "GET",
+        "path": "/customnode/installed",
+        "response_filter": {"type": "custom_node.list", "scope": "installed", "limit": 50},
+    }
+
+
+def test_manager_custom_node_search_request_uses_cached_custom_node_list():
+    request = manager_request_for_action(
+        {"type": "custom_node.search", "payload": {"query": "Impact Pack", "limit": 12}}
+    )
+
+    assert request == {
+        "method": "GET",
+        "path": "/customnode/getlist?mode=default&skip_update=true",
+        "response_filter": {"type": "custom_node.search", "query": "Impact Pack", "limit": 12},
+    }
+
+
+def test_manager_queue_start_request_uses_queue_start_endpoint():
+    request = manager_request_for_action({"type": "manager.queue_start", "payload": {}})
+
+    assert request == {"method": "POST", "path": "/manager/queue/start"}
+
+
+def test_manager_queue_reset_request_uses_queue_reset_endpoint():
+    request = manager_request_for_action({"type": "manager.queue_reset", "payload": {}})
+
+    assert request == {"method": "POST", "path": "/manager/queue/reset"}
+
+
+def test_manager_model_install_rejects_invalid_url():
+    with pytest.raises(ManagerActionError, match="http or https"):
+        manager_request_for_action(
+            {
+                "type": "model.install",
+                "payload": {
+                    "model": {
+                        "name": "hero.safetensors",
+                        "type": "checkpoints",
+                        "base": "SDXL",
+                        "save_path": "checkpoints",
+                        "url": "file:///tmp/hero.safetensors",
+                        "filename": "hero.safetensors",
+                    }
+                },
+            }
+        )
 
 
 def test_manager_rejects_invalid_git_url():

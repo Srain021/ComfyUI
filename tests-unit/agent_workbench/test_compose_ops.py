@@ -10,10 +10,13 @@ sys.path.insert(0, str(AGENT_ROOT))
 
 from agent_workbench.ops.compose import (
     apply_command_flag,
+    apply_command_value,
     apply_reserve_vram,
     patch_command_flag,
+    patch_command_value,
     patch_reserve_vram,
     plan_command_flag,
+    plan_command_value,
     plan_reserve_vram,
     validate_compose_text,
 )
@@ -121,6 +124,22 @@ def test_patch_command_flag_rejects_bad_or_required_flags():
         patch_command_flag(COMPOSE_TEXT, "--reserve-vram", enabled=False)
 
 
+def test_patch_command_value_updates_flag_value_preserving_comment():
+    patched = patch_command_value(COMPOSE_TEXT, "--reserve-vram", "12")
+
+    assert "- --reserve-vram" in patched
+    assert "- \"12\"  # keep this comment" in patched
+
+
+def test_patch_command_value_rejects_missing_or_bad_input():
+    with pytest.raises(ValueError, match="command flag must start"):
+        patch_command_value(COMPOSE_TEXT, "reserve-vram", "12")
+    with pytest.raises(ValueError, match="command value must not be empty"):
+        patch_command_value(COMPOSE_TEXT, "--reserve-vram", "")
+    with pytest.raises(ValueError, match="flag value line is missing"):
+        patch_command_value("services:\n  comfyui-gb10:\n    command:\n      - main.py\n", "--reserve-vram", "12")
+
+
 def test_plan_and_apply_command_flag_report_diff_and_snapshot(tmp_path):
     compose_path = tmp_path / "docker-compose.yml"
     backup_dir = tmp_path / "backups"
@@ -135,3 +154,19 @@ def test_plan_and_apply_command_flag_report_diff_and_snapshot(tmp_path):
     assert "- --bf16-vae" in compose_path.read_text(encoding="utf-8")
     assert result["flag"] == "--bf16-vae"
     assert result["enabled"] is True
+
+
+def test_plan_and_apply_command_value_report_diff_and_snapshot(tmp_path):
+    compose_path = tmp_path / "docker-compose.yml"
+    backup_dir = tmp_path / "backups"
+    compose_path.write_text(COMPOSE_TEXT, encoding="utf-8")
+
+    plan = plan_command_value(compose_path, "--reserve-vram", "14")
+    result = apply_command_value(compose_path, "--reserve-vram", "14", backup_dir)
+
+    assert plan["changed"] is True
+    assert "- \"14\"  # keep this comment" in plan["after"]
+    assert Path(result["snapshot"]).read_text(encoding="utf-8") == COMPOSE_TEXT
+    assert "- \"14\"  # keep this comment" in compose_path.read_text(encoding="utf-8")
+    assert result["flag"] == "--reserve-vram"
+    assert result["value"] == "14"

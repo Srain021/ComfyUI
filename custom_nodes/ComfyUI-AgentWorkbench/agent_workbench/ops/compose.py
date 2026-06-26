@@ -39,6 +39,20 @@ def _normalize_command_flag(flag: str) -> str:
     return normalized
 
 
+def _normalize_command_value(value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        raise ValueError("command value must not be empty")
+    if "\n" in normalized or "\r" in normalized:
+        raise ValueError("command value must be single-line")
+    return normalized
+
+
+def _quote_command_value(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _command_block_lines(lines: list[str]) -> tuple[int, int, str]:
     command_index = None
     service_indent = None
@@ -128,6 +142,35 @@ def patch_command_flag(text: str, flag: str, enabled: bool) -> str:
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
+def patch_command_value(text: str, flag: str, value: str) -> str:
+    validate_compose_text(text)
+    flag = _normalize_command_flag(flag)
+    value = _normalize_command_value(value)
+    lines = text.splitlines()
+    start_index, end_index, _ = _command_block_lines(lines)
+    flag_index = None
+    for index in range(start_index, end_index):
+        if lines[index].strip().startswith("- ") and _command_entry_value(lines[index]) == flag:
+            flag_index = index
+            break
+    if flag_index is None:
+        raise ValueError("flag value line is missing")
+
+    value_index = flag_index + 1
+    if value_index >= end_index or not lines[value_index].strip().startswith("- "):
+        raise ValueError("flag value line is missing")
+    if _command_entry_value(lines[value_index]).startswith("--"):
+        raise ValueError("flag value line is missing")
+
+    old_line = lines[value_index]
+    prefix = old_line.split("-", 1)[0] + "- "
+    suffix = ""
+    if "#" in old_line:
+        suffix = "  #" + old_line.split("#", 1)[1]
+    lines[value_index] = f"{prefix}{_quote_command_value(value)}{suffix}"
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
 def plan_reserve_vram(compose_path: Path, value: str) -> dict:
     value = _normalize_reserve_vram_value(value)
     original = compose_path.read_text(encoding="utf-8")
@@ -154,6 +197,21 @@ def plan_command_flag(compose_path: Path, flag: str, enabled: bool) -> dict:
     }
 
 
+def plan_command_value(compose_path: Path, flag: str, value: str) -> dict:
+    flag = _normalize_command_flag(flag)
+    value = _normalize_command_value(value)
+    original = compose_path.read_text(encoding="utf-8")
+    patched = patch_command_value(original, flag, value)
+    return {
+        "path": str(compose_path),
+        "changed": original != patched,
+        "before": original,
+        "after": patched,
+        "flag": flag,
+        "value": value,
+    }
+
+
 def apply_reserve_vram(compose_path: Path, value: str, backup_dir: Path) -> dict:
     value = _normalize_reserve_vram_value(value)
     original = compose_path.read_text(encoding="utf-8")
@@ -174,5 +232,21 @@ def apply_command_flag(compose_path: Path, flag: str, enabled: bool, backup_dir:
         "snapshot": str(snapshot),
         "flag": flag,
         "enabled": bool(enabled),
+        "changed": original != patched,
+    }
+
+
+def apply_command_value(compose_path: Path, flag: str, value: str, backup_dir: Path) -> dict:
+    flag = _normalize_command_flag(flag)
+    value = _normalize_command_value(value)
+    original = compose_path.read_text(encoding="utf-8")
+    patched = patch_command_value(original, flag, value)
+    snapshot = snapshot_file(compose_path, backup_dir, reason="compose-command-value")
+    compose_path.write_text(patched, encoding="utf-8")
+    return {
+        "path": str(compose_path),
+        "snapshot": str(snapshot),
+        "flag": flag,
+        "value": value,
         "changed": original != patched,
     }

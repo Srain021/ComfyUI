@@ -5,7 +5,12 @@ from pathlib import Path
 
 from .executor import DefaultExecutor
 from .ops.commands import PRERENDER_FREE_MEMORY_COMMAND, RESTORE_ORIGINAL_COMMAND
-from .ops.compose import DEFAULT_COMPOSE_PATH, apply_command_flag, apply_reserve_vram
+from .ops.compose import (
+    DEFAULT_COMPOSE_PATH,
+    apply_command_flag,
+    apply_command_value,
+    apply_reserve_vram,
+)
 from .ops.manager import manager_request_for_action
 from .ops.workflows import resolve_workflow_path, save_workflow_with_snapshot
 from .permissions import max_risk, requires_confirmation
@@ -25,6 +30,8 @@ ACTION_REGISTRY = {
     "graph.duplicate_node": ("graph.edit", "canvas"),
     "graph.set_color": ("graph.edit", "canvas"),
     "graph.set_mode": ("graph.edit", "canvas"),
+    "graph.set_collapsed": ("graph.edit", "canvas"),
+    "graph.set_size": ("graph.edit", "canvas"),
     "graph.set_title": ("graph.edit", "canvas"),
     "graph.set_position": ("graph.edit", "canvas"),
     "graph.select_node": ("graph.edit", "canvas"),
@@ -35,6 +42,12 @@ ACTION_REGISTRY = {
     "runtime.interrupt": ("runtime.interrupt", "runtime"),
     "runtime.free_memory": ("runtime.free_memory", "runtime"),
     "runtime.stop_ollama_model": ("runtime.free_memory", "runtime"),
+    "manager.queue_status": ("context.read", "read"),
+    "manager.queue_start": ("custom_node.manage", "package"),
+    "manager.queue_reset": ("custom_node.manage", "package"),
+    "model.install": ("model.manage", "package"),
+    "custom_node.list": ("context.read", "read"),
+    "custom_node.search": ("context.read", "read"),
     "custom_node.install": ("custom_node.manage", "package"),
     "custom_node.disable": ("custom_node.manage", "package"),
     "custom_node.enable": ("custom_node.manage", "package"),
@@ -46,6 +59,7 @@ ACTION_REGISTRY = {
     "custom_node.switch_version": ("custom_node.manage", "package"),
     "compose.set_reserve_vram": ("service.compose", "service"),
     "compose.set_command_flag": ("service.compose", "service"),
+    "compose.set_command_value": ("service.compose", "service"),
     "service.compose_up": ("service.compose", "service"),
     "service.update_comfyui": ("service.restart", "service"),
     "service.restart_container": ("service.restart", "service"),
@@ -54,6 +68,7 @@ ACTION_REGISTRY = {
     "service.prerender_free_memory": ("service.restart", "service"),
     "service.restore_original": ("service.restart", "service"),
     "service.healthcheck": ("context.read", "read"),
+    "service.logs": ("context.read", "read"),
     "sudo.print_command": ("sudo.print_only", "human_sudo"),
 }
 
@@ -62,6 +77,12 @@ FRONTEND_MEDIATED_ACTIONS = {
     "runtime.clear_queue",
     "runtime.interrupt",
     "runtime.free_memory",
+    "manager.queue_status",
+    "manager.queue_start",
+    "manager.queue_reset",
+    "model.install",
+    "custom_node.list",
+    "custom_node.search",
     "custom_node.install",
     "custom_node.disable",
     "custom_node.enable",
@@ -77,6 +98,7 @@ SERVER_DEFERABLE_ACTIONS = {
     "workflow.save",
     "compose.set_reserve_vram",
     "compose.set_command_flag",
+    "compose.set_command_value",
     "service.compose_up",
     "service.restart_container",
     "service.stop_container",
@@ -199,6 +221,11 @@ def _dispatch_action(action: dict, root: Path, executor, browser_workflow: objec
         return {"type": action_type, "applied": False, "reason": "context action is read-only"}
     if action_type == "service.healthcheck":
         return {"type": action_type, "commands": _run_healthcheck(executor)}
+    if action_type == "service.logs":
+        return {
+            "type": action_type,
+            "command": executor.run_command(["docker", "logs", "--tail", "80", "comfyui-gb10"]),
+        }
     if action_type == "workflow.save":
         path = str(_required_payload(payload, "path", action_type))
         workflow = _workflow_payload_for_save(payload, action_type, browser_workflow)
@@ -218,6 +245,15 @@ def _dispatch_action(action: dict, root: Path, executor, browser_workflow: objec
         enabled = _required_payload(payload, "enabled", action_type) is True
         compose_path = root / DEFAULT_COMPOSE_PATH
         result = apply_command_flag(compose_path, flag, enabled, _agent_backup_dir(root))
+        command_result = executor.run_command(
+            ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
+        )
+        return {"type": action_type, "compose": result, "command": command_result}
+    if action_type == "compose.set_command_value":
+        flag = str(_required_payload(payload, "flag", action_type))
+        value = str(_required_payload(payload, "value", action_type))
+        compose_path = root / DEFAULT_COMPOSE_PATH
+        result = apply_command_value(compose_path, flag, value, _agent_backup_dir(root))
         command_result = executor.run_command(
             ["docker", "compose", "-f", str(DEFAULT_COMPOSE_PATH), "up", "-d"]
         )
@@ -249,7 +285,15 @@ def _dispatch_action(action: dict, root: Path, executor, browser_workflow: objec
         return {"type": action_type, "http_request": {"path": "/queue", "json": {"clear": True}}}
     if action_type == "runtime.free_memory":
         return {"type": action_type, "http_request": {"path": "/free", "json": payload}}
+    if action_type in {"manager.queue_status", "manager.queue_start", "manager.queue_reset"}:
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
     if action_type == "service.update_comfyui":
+        request = manager_request_for_action(action)
+        executor.manager_request(request)
+        return {"type": action_type, "manager_request": request}
+    if action_type == "model.install":
         request = manager_request_for_action(action)
         executor.manager_request(request)
         return {"type": action_type, "manager_request": request}

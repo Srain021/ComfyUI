@@ -18,6 +18,44 @@ function requireNode(graph, nodeId) {
   return node;
 }
 
+function rememberNodeRef(nodeRefs, payload, node) {
+  const ref = payload?.ref;
+  if (typeof ref !== "string" || !ref.trim()) {
+    return null;
+  }
+  const key = ref.trim();
+  nodeRefs.set(key, node.id);
+  return key;
+}
+
+function resolveNodeReference(payload, idKey, refKey, nodeRefs) {
+  if (payload[idKey] !== undefined) {
+    return payload[idKey];
+  }
+  const ref = payload[refKey];
+  if (typeof ref !== "string" || !ref.trim()) {
+    return undefined;
+  }
+  const key = ref.trim();
+  if (!nodeRefs.has(key)) {
+    throw new Error(`Node ref not found: ${key}`);
+  }
+  return nodeRefs.get(key);
+}
+
+function requirePayloadNode(graph, payload, idKey, refKey, nodeRefs) {
+  return requireNode(graph, resolveNodeReference(payload, idKey, refKey, nodeRefs));
+}
+
+function payloadWithNodeReferences(payload, nodeRefs) {
+  return {
+    ...payload,
+    node_id: resolveNodeReference(payload, "node_id", "node_ref", nodeRefs),
+    origin_node_id: resolveNodeReference(payload, "origin_node_id", "origin_node_ref", nodeRefs),
+    target_node_id: resolveNodeReference(payload, "target_node_id", "target_node_ref", nodeRefs),
+  };
+}
+
 function graphLinks(graph) {
   const links = graph.links || [];
   return Array.isArray(links) ? links.filter(Boolean) : Object.values(links).filter(Boolean);
@@ -134,6 +172,17 @@ function resolvePosition(pos) {
   return nextPos;
 }
 
+function resolveSize(size) {
+  if (!Array.isArray(size) || size.length < 2) {
+    throw new Error("graph.set_size requires size [width, height]");
+  }
+  const nextSize = [Number(size[0]), Number(size[1])];
+  if (!Number.isFinite(nextSize[0]) || !Number.isFinite(nextSize[1]) || nextSize[0] <= 0 || nextSize[1] <= 0) {
+    throw new Error("graph.set_size requires positive finite dimensions");
+  }
+  return nextSize;
+}
+
 function cloneWidgetValue(value) {
   if (value === null || typeof value !== "object") {
     return value;
@@ -236,10 +285,10 @@ function selectGraphNodes(graph, nodes, focus) {
   repaintCanvas(graph);
 }
 
-export function applyGraphAction(action) {
+export function applyGraphAction(action, nodeRefs = new Map()) {
   if (action.type === "graph.set_widget") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     const widget = setWidgetValue(node, action.payload.widget, action.payload.value);
     app.graph.setDirtyCanvas(true, true);
     return { type: action.type, node_id: node.id, widget: widget.name };
@@ -265,13 +314,30 @@ export function applyGraphAction(action) {
     }
     graph.add(node, false);
     const changedWidgets = setWidgetValues(node, action.payload.widgets);
+    const ref = rememberNodeRef(nodeRefs, action.payload, node);
     markGraphDirty(graph);
-    return { type: action.type, node_id: node.id, node_type: nodeType, widgets: changedWidgets };
+    const row = { type: action.type, node_id: node.id, node_type: nodeType, widgets: changedWidgets };
+    if (ref !== null) {
+      row.ref = ref;
+    }
+    return row;
   }
   if (action.type === "graph.connect") {
     const graph = currentGraph();
-    const origin = requireNode(graph, action.payload.origin_node_id);
-    const target = requireNode(graph, action.payload.target_node_id);
+    const origin = requirePayloadNode(
+      graph,
+      action.payload,
+      "origin_node_id",
+      "origin_node_ref",
+      nodeRefs,
+    );
+    const target = requirePayloadNode(
+      graph,
+      action.payload,
+      "target_node_id",
+      "target_node_ref",
+      nodeRefs,
+    );
     const originSlot = resolveSlot(origin.outputs, action.payload.origin_slot, "Origin");
     const targetSlot = resolveSlot(target.inputs, action.payload.target_slot, "Target");
     origin.connect(originSlot, target, targetSlot);
@@ -286,23 +352,24 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.disconnect") {
     const graph = currentGraph();
-    if (action.payload.node_id !== undefined) {
-      const node = requireNode(graph, action.payload.node_id);
+    const payload = payloadWithNodeReferences(action.payload, nodeRefs);
+    if (payload.node_id !== undefined) {
+      const node = requireNode(graph, payload.node_id);
       const links = graphLinks(graph).filter((link) => (
         String(link.origin_id) === String(node.id) || String(link.target_id) === String(node.id)
       ));
       return { type: action.type, links: disconnectGraphLinks(graph, links) };
     }
-    if (action.payload.origin_node_id !== undefined) {
-      const links = matchingLinks(graph, action.payload);
+    if (payload.origin_node_id !== undefined) {
+      const links = matchingLinks(graph, payload);
       return { type: action.type, links: disconnectGraphLinks(graph, links) };
     }
-    if (action.payload.target_node_id !== undefined && action.payload.target_slot === undefined) {
-      const links = matchingLinks(graph, action.payload);
+    if (payload.target_node_id !== undefined && payload.target_slot === undefined) {
+      const links = matchingLinks(graph, payload);
       return { type: action.type, links: disconnectGraphLinks(graph, links) };
     }
-    const target = requireNode(graph, action.payload.target_node_id);
-    const targetSlot = resolveSlot(target.inputs, action.payload.target_slot, "Target");
+    const target = requireNode(graph, payload.target_node_id);
+    const targetSlot = resolveSlot(target.inputs, payload.target_slot, "Target");
     if (typeof target.disconnectInput !== "function") {
       throw new Error("Target node cannot disconnect inputs");
     }
@@ -312,24 +379,29 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.delete_node") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     graph.remove(node);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id };
   }
   if (action.type === "graph.duplicate_node") {
     const graph = currentGraph();
-    const source = requireNode(graph, action.payload.node_id);
+    const source = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     const copy = cloneGraphNode(graph, source, action.payload || {});
+    const ref = rememberNodeRef(nodeRefs, action.payload, copy);
     markGraphDirty(graph);
     if (action.payload.select !== false) {
       selectGraphNode(graph, copy, false);
     }
-    return { type: action.type, source_node_id: source.id, node_id: copy.id, pos: copy.pos };
+    const row = { type: action.type, source_node_id: source.id, node_id: copy.id, pos: copy.pos };
+    if (ref !== null) {
+      row.ref = ref;
+    }
+    return row;
   }
   if (action.type === "graph.set_color") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     const color = resolveGraphColor(action.payload.color, "color");
     const bgcolor = resolveGraphColor(action.payload.bgcolor, "bgcolor");
     node.color = color;
@@ -341,14 +413,31 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.set_mode") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     node.mode = resolveNodeMode(action.payload.mode);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id, mode: node.mode };
   }
+  if (action.type === "graph.set_collapsed") {
+    const graph = currentGraph();
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
+    const collapsed = action.payload.collapsed === true;
+    node.collapsed = collapsed;
+    node.flags = node.flags && typeof node.flags === "object" ? node.flags : {};
+    node.flags.collapsed = collapsed;
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, collapsed };
+  }
+  if (action.type === "graph.set_size") {
+    const graph = currentGraph();
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
+    node.size = resolveSize(action.payload.size);
+    markGraphDirty(graph);
+    return { type: action.type, node_id: node.id, size: node.size };
+  }
   if (action.type === "graph.set_title") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     if (typeof action.payload.title !== "string" || !action.payload.title) {
       throw new Error("graph.set_title requires title");
     }
@@ -358,24 +447,35 @@ export function applyGraphAction(action) {
   }
   if (action.type === "graph.set_position") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     node.pos = resolvePosition(action.payload.pos);
     markGraphDirty(graph);
     return { type: action.type, node_id: node.id, pos: node.pos };
   }
   if (action.type === "graph.select_node") {
     const graph = currentGraph();
-    const node = requireNode(graph, action.payload.node_id);
+    const node = requirePayloadNode(graph, action.payload, "node_id", "node_ref", nodeRefs);
     const focus = action.payload.focus === true;
     selectGraphNode(graph, node, focus);
     return { type: action.type, node_id: node.id, focus };
   }
   if (action.type === "graph.select_nodes") {
     const graph = currentGraph();
-    if (!Array.isArray(action.payload.node_ids) || !action.payload.node_ids.length) {
+    const nodeIds = Array.isArray(action.payload.node_ids) ? action.payload.node_ids : [];
+    const nodeRefsPayload = Array.isArray(action.payload.node_refs) ? action.payload.node_refs : [];
+    if (!nodeIds.length && !nodeRefsPayload.length) {
       throw new Error("graph.select_nodes requires node_ids");
     }
-    const nodes = action.payload.node_ids.map((nodeId) => requireNode(graph, nodeId));
+    const nodes = [
+      ...nodeIds.map((nodeId) => requireNode(graph, nodeId)),
+      ...nodeRefsPayload.map((nodeRef) => requirePayloadNode(
+        graph,
+        { node_ref: nodeRef },
+        "node_id",
+        "node_ref",
+        nodeRefs,
+      )),
+    ];
     const focus = action.payload.focus === true;
     selectGraphNodes(graph, nodes, focus);
     return { type: action.type, node_ids: nodes.map((node) => node.id), focus };
@@ -384,7 +484,8 @@ export function applyGraphAction(action) {
 }
 
 export function applyGraphActions(actions) {
+  const nodeRefs = new Map();
   return actions
     .filter((action) => action.type.startsWith("graph."))
-    .map((action) => applyGraphAction(action));
+    .map((action) => applyGraphAction(action, nodeRefs));
 }

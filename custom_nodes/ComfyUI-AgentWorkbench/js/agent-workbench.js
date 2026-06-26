@@ -1,22 +1,37 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import {
+  attachmentFromFile,
+  attachmentsForRequest,
+  filesFromDropEvent,
+  filesFromPasteEvent,
+} from "./attachments.mjs";
+import { createChatStore, historyForRequest } from "./chat-store.mjs";
+import {
+  renderChatTimeline,
+  responseText,
+  toolCardsFromResponse,
+} from "./chat-render.mjs";
+import { executeFrontendRequest } from "./frontend-requests.mjs";
 import { applyGraphActions } from "./graph-actions.js";
 import {
-  applyCompletionState,
   buildApplyRequest,
-  cancelDryRunState,
-  contextRefreshState,
-  controlStateForDryRun,
-  planCompletionState,
   planNeedsBrowserWorkflow,
 } from "./workbench-state.mjs";
 
 const WORKBENCH_STYLESHEET_ID = "agent-workbench-stylesheet";
 const WORKBENCH_STYLESHEET_HREF = "/extensions/ComfyUI-AgentWorkbench/agent-workbench.css";
+const WORKBENCH_PANEL_ID = "agent-workbench-panel";
+const WORKBENCH_SIDEBAR_ID = "agent-workbench-sidebar";
+const CHAT_STORE_KEY = "ComfyUI.AgentWorkbench.chat.v1";
 const MAX_GRAPH_NODES = 500;
 const MAX_GRAPH_LINKS = 1000;
+const MAX_NODE_TYPES = 1000;
+const MAX_NODE_TYPE_INPUTS = 128;
 const MAX_NODE_SLOTS = 64;
 const MAX_WIDGET_VALUE_LENGTH = 500;
+const MAX_NODE_PROPERTY_VALUE_LENGTH = 200;
+const MANAGER_NODE_PROPERTY_KEYS = ["cnr_id", "aux_id", "ver"];
 
 function loadWorkbenchStylesheet() {
   if (document.getElementById(WORKBENCH_STYLESHEET_ID)) {
@@ -37,11 +52,105 @@ function boundedValue(value) {
   return value;
 }
 
+function nodeProperties(properties) {
+  if (!properties || typeof properties !== "object") {
+    return undefined;
+  }
+  const row = {};
+  for (const key of MANAGER_NODE_PROPERTY_KEYS) {
+    const value = properties[key];
+    if (typeof value !== "string" || !value) {
+      continue;
+    }
+    row[key] = value.length > MAX_NODE_PROPERTY_VALUE_LENGTH
+      ? `${value.slice(0, MAX_NODE_PROPERTY_VALUE_LENGTH)}...`
+      : value;
+  }
+  return Object.keys(row).length ? row : undefined;
+}
+
 function slotRows(slots) {
   return (slots || []).slice(0, MAX_NODE_SLOTS).map((slot) => ({
     name: slot.name,
     type: slot.type,
   }));
+}
+
+function nodeInputType(inputSpec) {
+  if (!Array.isArray(inputSpec) || !inputSpec.length) {
+    return undefined;
+  }
+  if (Array.isArray(inputSpec[0])) {
+    return "COMBO";
+  }
+  if (typeof inputSpec[0] === "string") {
+    return inputSpec[0];
+  }
+  return undefined;
+}
+
+function nodeTypeInputs(nodeData) {
+  const rows = [];
+  const input = nodeData?.input || {};
+  const inputOrder = nodeData?.input_order || {};
+  for (const section of ["required", "optional"]) {
+    const sectionInput = input[section] || {};
+    const names = Array.isArray(inputOrder[section]) ? inputOrder[section] : Object.keys(sectionInput);
+    for (const name of names) {
+      if (typeof name !== "string" || !name) {
+        continue;
+      }
+      const row = { name };
+      const type = nodeInputType(sectionInput[name]);
+      if (type) {
+        row.type = type;
+      }
+      rows.push(row);
+      if (rows.length >= MAX_NODE_TYPE_INPUTS) {
+        return rows;
+      }
+    }
+  }
+  return rows;
+}
+
+function nodeTypeOutputs(nodeData) {
+  const outputTypes = Array.isArray(nodeData?.output) ? nodeData.output : [];
+  const outputNames = Array.isArray(nodeData?.output_name) ? nodeData.output_name : [];
+  return outputTypes.slice(0, MAX_NODE_TYPE_INPUTS).map((type, index) => {
+    const name = typeof outputNames[index] === "string" && outputNames[index]
+      ? outputNames[index]
+      : type;
+    const row = { name };
+    if (typeof type === "string" && type) {
+      row.type = type;
+    }
+    return row;
+  });
+}
+
+function registeredNodeTypes() {
+  const registered = globalThis.LiteGraph?.registered_node_types || {};
+  return Object.entries(registered)
+    .slice(0, MAX_NODE_TYPES)
+    .filter(([type]) => typeof type === "string" && type)
+    .map(([type, nodeClass]) => {
+      const title = nodeClass?.title || nodeClass?.prototype?.title || type;
+      const category = nodeClass?.category || nodeClass?.prototype?.category;
+      const inputs = nodeTypeInputs(nodeClass?.nodeData);
+      const outputs = nodeTypeOutputs(nodeClass?.nodeData);
+      const row = { type, title };
+      if (category) {
+        row.category = category;
+      }
+      if (inputs.length) {
+        row.inputs = inputs;
+      }
+      if (outputs.length) {
+        row.outputs = outputs;
+      }
+      return row;
+    });
 }
 
 function currentGraphSnapshot() {
@@ -58,6 +167,7 @@ function currentGraphSnapshot() {
       bgcolor: node.bgcolor,
       pos: node.pos,
       selected: Boolean(node.selected),
+      properties: nodeProperties(node.properties),
       widgets: (node.widgets || []).map((widget) => ({
         name: widget.name,
         value: boundedValue(widget.value),
@@ -73,6 +183,7 @@ function currentGraphSnapshot() {
       target_slot: link.target_slot,
       type: link.type,
     })),
+    node_types: registeredNodeTypes(),
   };
 }
 
@@ -96,26 +207,13 @@ async function postJson(path, body) {
   return payload;
 }
 
-function renderJson(element, value) {
-  element.textContent = JSON.stringify(value, null, 2);
-}
-
-async function executeFrontendRequest(request) {
-  const options = { method: request.method || "POST", headers: {} };
-  if (request.json) {
-    options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(request.json);
+async function getJson(path) {
+  const response = await api.fetchApi(path, { method: "GET" });
+  const payload = await response.json().catch(() => ({ ok: false, error: "invalid_json_response" }));
+  if (!response.ok && typeof payload === "object" && payload !== null) {
+    payload.http_status = response.status;
   }
-  if (request.body) {
-    options.body = request.body;
-  }
-  const response = await api.fetchApi(request.path, options);
-  const result = { path: request.path, status: response.status };
-  if (request.path.startsWith("/manager/queue/") && response.status === 200) {
-    const queueResponse = await api.fetchApi("/manager/queue/start", { method: "POST" });
-    result.queue_start_status = queueResponse.status;
-  }
-  return result;
+  return payload;
 }
 
 function commandStore() {
@@ -166,168 +264,374 @@ async function executeBrowserRuntimeActions(actions) {
   return rows;
 }
 
-function createWorkbenchPanel() {
-  if (document.getElementById("agent-workbench-panel")) {
-    return;
+function createWorkbenchPanel(container) {
+  const host = container || document.body;
+  const existing = document.getElementById(WORKBENCH_PANEL_ID);
+  if (existing) {
+    existing.classList.remove("agent-workbench-floating");
+    host.append(existing);
+    return existing;
   }
 
   const panel = document.createElement("section");
-  panel.id = "agent-workbench-panel";
+  panel.id = WORKBENCH_PANEL_ID;
   panel.innerHTML = `
     <header>
       <strong>Agent Workbench</strong>
-      <button id="agent-workbench-context" title="Refresh context">Context</button>
+      <div class="agent-workbench-header-actions">
+        <button id="agent-workbench-smoke" title="Show Windows browser smoke checklist">自检</button>
+        <button id="agent-workbench-context" title="Refresh context">上下文</button>
+      </div>
     </header>
-    <textarea id="agent-workbench-input" placeholder="Describe the ComfyUI operation"></textarea>
-    <div class="agent-workbench-actions">
-      <button id="agent-workbench-plan">Plan</button>
-      <button id="agent-workbench-apply" disabled>Apply</button>
-      <button id="agent-workbench-cancel" hidden>Cancel</button>
-    </div>
-    <label class="agent-workbench-confirm" hidden>
-      <input id="agent-workbench-confirm" type="checkbox" />
-      <span>Confirm elevated action</span>
-    </label>
-    <pre id="agent-workbench-output">Ready.</pre>
+    <section id="agent-workbench-thread" aria-live="polite"></section>
+    <section class="agent-workbench-composer">
+      <div id="agent-workbench-attachments" aria-live="polite"></div>
+      <textarea id="agent-workbench-input" placeholder="告诉 Agent 你要怎么改节点、插件或服务"></textarea>
+      <input id="agent-workbench-file" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.yaml,.yml,.log,.py,.js,.ts,.css,.html" hidden />
+      <div class="agent-workbench-actions">
+        <button id="agent-workbench-upload" type="button" aria-label="Upload files">上传</button>
+        <button id="agent-workbench-send" type="button" aria-label="Send message to Agent">发送</button>
+        <button id="agent-workbench-clear" type="button" aria-label="Clear chat history">清空</button>
+      </div>
+    </section>
   `;
-  document.body.appendChild(panel);
+  host.append(panel);
 
+  const store = createChatStore({ key: CHAT_STORE_KEY });
+  const thread = panel.querySelector("#agent-workbench-thread");
   const input = panel.querySelector("#agent-workbench-input");
-  const output = panel.querySelector("#agent-workbench-output");
-  const applyButton = panel.querySelector("#agent-workbench-apply");
-  const confirmRow = panel.querySelector(".agent-workbench-confirm");
-  const confirmCheckbox = panel.querySelector("#agent-workbench-confirm");
-  const cancelButton = panel.querySelector("#agent-workbench-cancel");
-  let lastDryRun = null;
-  let applyInFlight = false;
+  const sendButton = panel.querySelector("#agent-workbench-send");
+  const uploadButton = panel.querySelector("#agent-workbench-upload");
+  const clearButton = panel.querySelector("#agent-workbench-clear");
+  const fileInput = panel.querySelector("#agent-workbench-file");
+  const attachmentsTray = panel.querySelector("#agent-workbench-attachments");
+  let pendingAttachments = [];
+  let requestInFlight = false;
+  const runningApplies = new Set();
 
-  function refreshApplyState() {
-    const state = controlStateForDryRun(lastDryRun, confirmCheckbox.checked, applyInFlight);
-    confirmRow.hidden = state.confirmHidden;
-    cancelButton.hidden = state.cancelHidden;
-    applyButton.disabled = state.applyDisabled;
+  function isActionableDryRun(response) {
+    return toolCardsFromResponse(response).length > 0;
+  }
+
+  function renderPendingAttachments() {
+    attachmentsTray.replaceChildren();
+    if (!pendingAttachments.length) {
+      attachmentsTray.hidden = true;
+      return;
+    }
+    attachmentsTray.hidden = false;
+    for (const attachment of pendingAttachments) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `agent-workbench-pending-attachment agent-workbench-attachment-${attachment.kind || "file"}`;
+      chip.title = "移除附件";
+      chip.textContent = attachment.name || attachment.kind || "attachment";
+      chip.addEventListener("click", () => {
+        pendingAttachments = pendingAttachments.filter((row) => row.id !== attachment.id);
+        renderPendingAttachments();
+      });
+      attachmentsTray.append(chip);
+    }
+  }
+
+  function render() {
+    const messages = store.load();
+    renderChatTimeline(thread, messages, {
+      onApplyTool: applyToolMessage,
+      onCancelTool: cancelToolMessage,
+    });
+  }
+
+  function appendAssistantResponse(response, fallbackText = "") {
+    return store.append({
+      role: "assistant",
+      text: responseText(response) || fallbackText,
+      response,
+      tool_state: isActionableDryRun(response) ? { status: "pending" } : undefined,
+    });
+  }
+
+  async function applyDryRun(dryRun, confirmed) {
+    const applyRequest = buildApplyRequest(
+      dryRun,
+      confirmed,
+      currentWorkflowSnapshot(),
+    );
+    if (!applyRequest) {
+      return { ok: false, error: "missing_plan" };
+    }
+    const plan = applyRequest.plan;
+    const approvedHash = applyRequest.approved_hash;
+    const result = await postJson("/agent/apply", applyRequest);
+    if (result.ok) {
+      try {
+        result.browser_applied = applyGraphActions(dryRun.plan.actions);
+        result.browser_runtime = await executeBrowserRuntimeActions(dryRun.plan.actions);
+      } catch (error) {
+        result.ok = false;
+        result.browser_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (result.ok) {
+      try {
+        result.frontend_requests = [];
+        for (const applied of result.applied || []) {
+          if (applied.manager_request) {
+            result.frontend_requests.push(await executeFrontendRequest(applied.manager_request, api.fetchApi.bind(api)));
+          }
+          if (applied.http_request) {
+            result.frontend_requests.push(await executeFrontendRequest({
+              method: "POST",
+              path: applied.http_request.path,
+              json: applied.http_request.json,
+            }, api.fetchApi.bind(api)));
+          }
+        }
+      } catch (error) {
+        result.ok = false;
+        result.frontend_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (result.ok) {
+      try {
+        result.deferred_server_actions = [];
+        for (const applied of result.applied || []) {
+          if (applied.deferred === true && Number.isInteger(applied.action_index)) {
+            const deferredRequest = {
+              plan,
+              approved_hash: approvedHash,
+              action_index: applied.action_index,
+            };
+            if (planNeedsBrowserWorkflow(plan)) {
+              deferredRequest.browser_workflow = currentWorkflowSnapshot();
+            }
+            result.deferred_server_actions.push(await postJson("/agent/apply-deferred", deferredRequest));
+          }
+        }
+      } catch (error) {
+        result.ok = false;
+        result.deferred_error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return result;
+  }
+
+  async function applyToolMessage(message, confirmed) {
+    if (!message?.id || runningApplies.has(message.id) || !message.response?.plan) {
+      return;
+    }
+    runningApplies.add(message.id);
+    store.update(message.id, { tool_state: { status: "running" } });
+    render();
+    try {
+      const result = await applyDryRun(message.response, confirmed);
+      store.update(message.id, {
+        tool_state: {
+          status: result.ok ? "applied" : "failed",
+          result,
+        },
+      });
+      store.append({
+        role: "tool",
+        text: responseText(result),
+        response: result,
+      });
+    } catch (error) {
+      const result = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      store.update(message.id, { tool_state: { status: "failed", result } });
+      store.append({
+        role: "tool",
+        text: responseText(result),
+        response: result,
+      });
+    } finally {
+      runningApplies.delete(message.id);
+      render();
+    }
+  }
+
+  function cancelToolMessage(message) {
+    if (!message?.id) {
+      return;
+    }
+    const result = { ok: false, error: "user_cancelled" };
+    store.update(message.id, { tool_state: { status: "cancelled", result } });
+    store.append({
+      role: "tool",
+      text: "已取消这个计划。",
+      response: result,
+    });
+    render();
+  }
+
+  async function addFiles(files) {
+    const rows = [];
+    for (const file of Array.from(files || [])) {
+      rows.push(await attachmentFromFile(file));
+    }
+    pendingAttachments = [...pendingAttachments, ...rows];
+    renderPendingAttachments();
+  }
+
+  async function sendMessage() {
+    if (requestInFlight) {
+      return;
+    }
+    const message = input.value.trim();
+    if (!message && !pendingAttachments.length) {
+      return;
+    }
+    requestInFlight = true;
+    sendButton.disabled = true;
+    const attachments = pendingAttachments;
+    const previousMessages = store.load();
+    const outgoingText = message || "请查看我上传的附件。";
+    store.append({ role: "user", text: outgoingText, attachments });
+    input.value = "";
+    pendingAttachments = [];
+    renderPendingAttachments();
+    const thinking = store.append({ role: "assistant", text: "正在思考..." });
+    render();
+    try {
+      const response = await postJson("/agent/message", {
+        message: outgoingText,
+        graph: currentGraphSnapshot(),
+        history: historyForRequest(previousMessages),
+        attachments: attachmentsForRequest(attachments),
+      });
+      store.update(thinking.id, {
+        text: responseText(response),
+        response,
+        tool_state: isActionableDryRun(response) ? { status: "pending" } : undefined,
+      });
+    } catch (error) {
+      store.update(thinking.id, {
+        text: error instanceof Error ? error.message : String(error),
+        response: {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    } finally {
+      requestInFlight = false;
+      sendButton.disabled = false;
+      render();
+    }
   }
 
   panel.querySelector("#agent-workbench-context").addEventListener("click", async () => {
-    applyButton.disabled = true;
-    const state = contextRefreshState();
-    lastDryRun = state.lastDryRun;
-    confirmCheckbox.checked = state.confirmChecked;
-    refreshApplyState();
-    renderJson(output, await postJson("/agent/context", { graph: currentGraphSnapshot() }));
+    const response = await postJson("/agent/context", { graph: currentGraphSnapshot() });
+    store.append({
+      role: "assistant",
+      text: "已读取当前 ComfyUI 上下文。",
+      response,
+    });
+    render();
   });
 
-  panel.querySelector("#agent-workbench-plan").addEventListener("click", async () => {
-    const message = input.value.trim() || "Inspect current ComfyUI context";
-    confirmCheckbox.checked = false;
-    const planned = planCompletionState(await postJson("/agent/plan", {
-      message,
-      graph: currentGraphSnapshot(),
-    }));
-    lastDryRun = planned.lastDryRun;
-    confirmCheckbox.checked = planned.confirmChecked;
-    refreshApplyState();
-    renderJson(output, lastDryRun);
+  panel.querySelector("#agent-workbench-smoke").addEventListener("click", async () => {
+    appendAssistantResponse(await getJson("/agent/smoke_manifest"), "已加载自检清单。");
+    render();
   });
 
-  confirmCheckbox.addEventListener("change", refreshApplyState);
-
-  cancelButton.addEventListener("click", () => {
-    const cancelled = cancelDryRunState();
-    lastDryRun = cancelled.lastDryRun;
-    confirmCheckbox.checked = cancelled.confirmChecked;
-    refreshApplyState();
-    renderJson(output, cancelled.output);
+  uploadButton.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    await addFiles(fileInput.files);
+    fileInput.value = "";
+  });
+  sendButton.addEventListener("click", sendMessage);
+  clearButton.addEventListener("click", () => {
+    store.clear();
+    appendAssistantResponse({
+      ok: true,
+      status: "assistant_reply",
+      assistant: {
+        title: "ComfyUI Codex Agent",
+        message: "历史已清空。你可以继续发文字、图片，或让我操作当前工作流。",
+      },
+    });
+    render();
   });
 
-  applyButton.addEventListener("click", async () => {
-    if (applyInFlight) {
-      return;
-    }
-    if (!lastDryRun?.plan) {
-      return;
-    }
-    applyInFlight = true;
-    refreshApplyState();
-    try {
-      const applyRequest = buildApplyRequest(
-        lastDryRun,
-        confirmCheckbox.checked,
-        currentWorkflowSnapshot(),
-      );
-      const plan = applyRequest.plan;
-      const approvedHash = applyRequest.approved_hash;
-      const result = await postJson("/agent/apply", applyRequest);
-      if (result.ok) {
-        try {
-          result.browser_applied = applyGraphActions(lastDryRun.plan.actions);
-          result.browser_runtime = await executeBrowserRuntimeActions(lastDryRun.plan.actions);
-        } catch (error) {
-          result.ok = false;
-          result.browser_error = error instanceof Error ? error.message : String(error);
-        }
-      }
-      if (result.ok) {
-        try {
-          result.frontend_requests = [];
-          for (const applied of result.applied || []) {
-            if (applied.manager_request) {
-              result.frontend_requests.push(await executeFrontendRequest(applied.manager_request));
-            }
-            if (applied.http_request) {
-              result.frontend_requests.push(await executeFrontendRequest({
-                method: "POST",
-                path: applied.http_request.path,
-                json: applied.http_request.json,
-              }));
-            }
-          }
-        } catch (error) {
-          result.ok = false;
-          result.frontend_error = error instanceof Error ? error.message : String(error);
-        }
-      }
-      if (result.ok) {
-        try {
-          result.deferred_server_actions = [];
-          for (const applied of result.applied || []) {
-            if (applied.deferred === true && Number.isInteger(applied.action_index)) {
-              const deferredRequest = {
-                plan,
-                approved_hash: approvedHash,
-                action_index: applied.action_index,
-              };
-              if (planNeedsBrowserWorkflow(plan)) {
-                deferredRequest.browser_workflow = currentWorkflowSnapshot();
-              }
-              result.deferred_server_actions.push(await postJson("/agent/apply-deferred", deferredRequest));
-            }
-          }
-        } catch (error) {
-          result.ok = false;
-          result.deferred_error = error instanceof Error ? error.message : String(error);
-        }
-      }
-      const completion = applyCompletionState(result, lastDryRun, confirmCheckbox.checked);
-      lastDryRun = completion.lastDryRun;
-      confirmCheckbox.checked = completion.confirmChecked;
-      renderJson(output, result);
-    } catch (error) {
-      renderJson(output, {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      applyInFlight = false;
-      refreshApplyState();
+  input.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      sendMessage();
     }
   });
+  input.addEventListener("paste", async (event) => {
+    const files = filesFromPasteEvent(event);
+    if (files.length) {
+      event.preventDefault();
+      await addFiles(files);
+    }
+  });
+  panel.addEventListener("dragover", (event) => {
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      panel.classList.add("agent-workbench-dragover");
+    }
+  });
+  panel.addEventListener("dragleave", () => {
+    panel.classList.remove("agent-workbench-dragover");
+  });
+  panel.addEventListener("drop", async (event) => {
+    const files = filesFromDropEvent(event);
+    if (files.length) {
+      event.preventDefault();
+      panel.classList.remove("agent-workbench-dragover");
+      await addFiles(files);
+    }
+  });
+
+  if (!store.load().length) {
+    appendAssistantResponse({
+      ok: true,
+      status: "assistant_reply",
+      assistant: {
+        title: "ComfyUI Codex Agent",
+        message: "我在 ComfyUI 侧边栏里。你可以发自然语言、粘贴截图、上传文本或图片；需要改节点、安装/禁用 custom nodes、改 compose 或重启服务时，我会先给你计划卡片，等你允许再执行。",
+      },
+    });
+  }
+  renderPendingAttachments();
+  render();
+
+  return panel;
+}
+
+function registerWorkbenchSidebar() {
+  if (typeof app.extensionManager?.registerSidebarTab !== "function") {
+    return false;
+  }
+  app.extensionManager.registerSidebarTab({
+    id: "agent-workbench-sidebar",
+    title: "Agent Workbench",
+    icon: "agent-workbench-sidebar-icon",
+    type: "custom",
+    render: (container) => {
+      container.classList.add("agent-workbench-sidebar-host");
+      createWorkbenchPanel(container);
+    },
+  });
+  return true;
+}
+
+function createFloatingWorkbenchPanel() {
+  const panel = createWorkbenchPanel(document.body);
+  panel.classList.add("agent-workbench-floating");
+  return panel;
 }
 
 app.registerExtension({
   name: "ComfyUI.AgentWorkbench",
   setup() {
     loadWorkbenchStylesheet();
-    createWorkbenchPanel();
+    if (!registerWorkbenchSidebar()) {
+      createFloatingWorkbenchPanel();
+    }
   },
 });

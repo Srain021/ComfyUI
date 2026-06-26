@@ -1,11 +1,16 @@
 import os
 import re
+from urllib.parse import unquote, urlparse
 
 
 MAX_PLANNER_GRAPH_NODES = 500
 MAX_PLANNER_GRAPH_LINKS = 1000
 MAX_PLANNER_WIDGETS_PER_NODE = 64
 MAX_PLANNER_SLOTS_PER_NODE = 64
+MAX_PLANNER_NODE_TYPES = 1000
+MAX_PLANNER_NODE_TYPE_INPUTS = 128
+RELATIVE_NODE_X_GAP = 220
+RELATIVE_NODE_Y_GAP = 180
 
 
 def _context_plan(message: str) -> dict:
@@ -26,6 +31,9 @@ VALUE_SET_DELIMITERS = (
     "替换为",
     "改成",
     "改为",
+    "更新成",
+    "更新为",
+    "更新到",
     "设置为",
     "设置成",
     "设为",
@@ -44,6 +52,9 @@ VALUE_SET_DELIMITERS = (
     "降低到",
     "降低为",
     "降低成",
+    "降到",
+    "降为",
+    "降成",
     "调低到",
     "调低为",
     "调低成",
@@ -56,6 +67,8 @@ VALUE_SET_DELIMITERS = (
     "变成",
     "写成",
     "写为",
+    "描述成",
+    "描述为",
     "换成",
     "换为",
     "填成",
@@ -69,6 +82,7 @@ TEXT_REMOVE_DELIMITERS = ("去掉", "去除", "删除", "删掉", "移除")
 TEXT_CLEAR_TERMS = ("清空", "清除", "清掉", "clear", "empty")
 SEED_RANDOM_TERMS = ("随机", "random", "randomize")
 SEED_FIXED_TERMS = ("固定", "锁定", "fixed", "fix")
+WIDGET_ASSIGNMENT_OPERATORS = (*VALUE_SET_DELIMITERS, "=", ":", "：", "是")
 
 
 def _extract_value_after_set(text: str) -> str | None:
@@ -76,7 +90,7 @@ def _extract_value_after_set(text: str) -> str | None:
         if delimiter in text:
             return _strip_value(text.rsplit(delimiter, 1)[1])
     match = re.search(
-        r"\b(?:set|change|update|write|replace|fill)\b.+?\b(?:to|as|with)\b\s*(.+)$",
+        r"\b(?:set|change|update|write|replace|fill|resize)\b.+?\b(?:to|as|with)\b\s*(.+)$",
         text,
         re.IGNORECASE,
     )
@@ -106,7 +120,10 @@ def _coerce_widget_value(value: str, widget: dict) -> object:
         try:
             return int(value)
         except ValueError:
-            return value
+            try:
+                return float(value)
+            except ValueError:
+                return value
     if isinstance(current, float):
         try:
             return float(value)
@@ -135,6 +152,25 @@ def _graph_links(context: dict) -> list[dict]:
     return [link for link in links[:MAX_PLANNER_GRAPH_LINKS] if isinstance(link, dict)]
 
 
+def _graph_node_types(context: dict) -> list[dict]:
+    graph = context.get("graph_input") if isinstance(context, dict) else None
+    if not isinstance(graph, dict):
+        return []
+    node_types = graph.get("node_types")
+    if not isinstance(node_types, list):
+        return []
+    rows = []
+    for row in node_types[:MAX_PLANNER_NODE_TYPES]:
+        if not isinstance(row, dict) or not isinstance(row.get("type"), str):
+            continue
+        rows.append(row)
+    return rows
+
+
+def _graph_registered_node_type_names(context: dict) -> set[str]:
+    return {row["type"] for row in _graph_node_types(context)}
+
+
 def _node_widgets(node: dict) -> list[dict]:
     widgets = node.get("widgets")
     if not isinstance(widgets, list):
@@ -160,6 +196,63 @@ def _extract_node_id(text: str) -> str | None:
     return None
 
 
+CHINESE_ORDINAL_INDEXES = {
+    "一": 0,
+    "二": 1,
+    "两": 1,
+    "三": 2,
+    "四": 3,
+    "五": 4,
+    "六": 5,
+    "七": 6,
+    "八": 7,
+    "九": 8,
+    "十": 9,
+}
+
+ENGLISH_ORDINAL_INDEXES = {
+    "first": 0,
+    "1st": 0,
+    "second": 1,
+    "2nd": 1,
+    "third": 2,
+    "3rd": 2,
+    "fourth": 3,
+    "4th": 3,
+    "fifth": 4,
+    "5th": 4,
+    "sixth": 5,
+    "6th": 5,
+    "seventh": 6,
+    "7th": 6,
+    "eighth": 7,
+    "8th": 7,
+    "ninth": 8,
+    "9th": 8,
+    "tenth": 9,
+    "10th": 9,
+}
+
+
+def _extract_ordinal_index(text: str) -> int | None:
+    match = re.search(r"第\s*(?P<ordinal>\d+|[一二两三四五六七八九十])\s*(?:个|個)", text)
+    if match:
+        ordinal = match.group("ordinal")
+        if ordinal.isdigit():
+            index = int(ordinal) - 1
+            return index if index >= 0 else None
+        return CHINESE_ORDINAL_INDEXES.get(ordinal)
+    match = re.search(
+        r"\b(?P<ordinal>first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|"
+        r"sixth|6th|seventh|7th|eighth|8th|ninth|9th|tenth|10th)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return ENGLISH_ORDINAL_INDEXES.get(match.group("ordinal").lower())
+
+
 def _find_node_by_id(nodes: list[dict], node_id: str | None) -> dict | None:
     if node_id is None:
         return None
@@ -167,6 +260,24 @@ def _find_node_by_id(nodes: list[dict], node_id: str | None) -> dict | None:
         if str(node.get("id")) == node_id:
             return node
     return None
+
+
+def _find_node_by_ordinal(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> dict | None:
+    index = _extract_ordinal_index(text)
+    if index is None:
+        return None
+    matches = _find_nodes_by_semantic_label(nodes, text, links)
+    if not matches:
+        matches = _find_nodes_by_label(nodes, text)
+    if not matches and ("节点" in text or "node" in text.lower()):
+        matches = nodes
+    if index >= len(matches):
+        return None
+    return matches[index]
 
 
 def _selected_nodes(nodes: list[dict]) -> list[dict]:
@@ -215,8 +326,28 @@ NODE_LABEL_ALIASES = (
         ("checkpointloader", "checkpointloadersimple", "load checkpoint", "checkpoint"),
     ),
     (
+        ("vae 解码", "vae解码", "vae decode", "decode vae", "latent 转图像", "latent to image"),
+        ("vaedecode", "vae decode", "decode"),
+    ),
+    (
+        ("vae 编码", "vae编码", "vae encode", "encode vae", "图像转 latent", "image to latent"),
+        ("vaeencode", "vae encode", "encode"),
+    ),
+    (
         ("vae",),
         ("vaeloader", "load vae", "vae loader"),
+    ),
+    (
+        ("加载图片", "导入图片", "输入图片", "输入图像", "参考图", "参考图片", "load image", "image input"),
+        ("loadimage", "load image"),
+    ),
+    (
+        ("图像缩放", "图片缩放", "缩放节点", "image scale", "image resize", "resize image"),
+        ("imagescale", "image scale", "image resize", "resize image"),
+    ),
+    (
+        ("超分模型", "放大模型", "upscale model", "upscaler model"),
+        ("upscalemodelloader", "upscale model", "load upscale model"),
     ),
     (
         ("lora", "lora 模型", "lora模型"),
@@ -233,6 +364,14 @@ NODE_LABEL_ALIASES = (
     (
         ("clip skip", "clip layer", "clip 层", "clip跳层"),
         ("clipsetlastlayer", "clip set last layer"),
+    ),
+    (
+        ("controlnet 模型加载器", "controlnet loader", "load controlnet model", "控制网模型加载器"),
+        ("controlnetloader", "load controlnet model", "controlnet loader"),
+    ),
+    (
+        ("controlnet", "control net", "控制网", "控制网络"),
+        ("controlnet", "control net"),
     ),
 )
 
@@ -299,7 +438,7 @@ def _prompt_role_assignment_matches(text: str) -> list[tuple[str, str, str]]:
     role_pattern = "|".join(re.escape(term) for term in sorted(role_terms, key=len, reverse=True))
     operator_pattern = "|".join(
         re.escape(operator)
-        for operator in sorted((*VALUE_SET_DELIMITERS, "=", "to", "as", "with"), key=len, reverse=True)
+        for operator in sorted((*WIDGET_ASSIGNMENT_OPERATORS, "to", "as", "with"), key=len, reverse=True)
     )
     prefix_pattern = (
         r"(?:然后把|然后将|接着把|接着将|并且把|并且将|并把|并将|再把|再将|把|将|给|and\s+)?"
@@ -450,6 +589,10 @@ def _select_node(nodes: list[dict], text: str, links: list[dict] | None = None) 
     if explicit is not None:
         return explicit
 
+    ordinal = _find_node_by_ordinal(nodes, text, links)
+    if ordinal is not None:
+        return ordinal
+
     selected = _selected_nodes(nodes)
     if _message_mentions_current_node(text) and len(selected) == 1:
         return selected[0]
@@ -461,6 +604,38 @@ def _select_node(nodes: list[dict], text: str, links: list[dict] | None = None) 
     labelled = _find_node_by_label(nodes, text)
     if labelled is not None:
         return labelled
+
+    if len(selected) == 1:
+        return selected[0]
+    if len(nodes) == 1:
+        return nodes[0]
+    return None
+
+
+def _select_node_preferring_label(
+    nodes: list[dict],
+    text: str,
+    links: list[dict] | None = None,
+) -> dict | None:
+    explicit = _find_node_by_id(nodes, _extract_node_id(text))
+    if explicit is not None:
+        return explicit
+
+    ordinal = _find_node_by_ordinal(nodes, text, links)
+    if ordinal is not None:
+        return ordinal
+
+    selected = _selected_nodes(nodes)
+    if _message_mentions_current_node(text) and len(selected) == 1:
+        return selected[0]
+
+    labelled = _find_node_by_label(nodes, text)
+    if labelled is not None:
+        return labelled
+
+    semantic = _find_node_by_semantic_label(nodes, text, links)
+    if semantic is not None:
+        return semantic
 
     if len(selected) == 1:
         return selected[0]
@@ -580,6 +755,26 @@ WIDGET_ALIASES = (
         ("format", "file format", "image format", "video format", "格式", "保存格式", "输出格式", "图片格式", "视频格式"),
         ("format", "image_format", "video_format", "file_format"),
     ),
+    (
+        ("image", "input image", "source image", "reference image", "图片", "图像", "输入图", "输入图片", "参考图", "参考图片"),
+        ("image", "image_path", "input_image", "reference_image"),
+    ),
+    (
+        ("upscale method", "upscale_method", "scale method", "resize method", "缩放算法", "放大算法", "插值算法"),
+        ("upscale_method", "method", "resize_method", "interpolation"),
+    ),
+    (
+        ("crop", "crop mode", "裁剪", "裁剪模式"),
+        ("crop", "crop_mode"),
+    ),
+    (
+        ("超分模型", "放大模型", "upscale model", "upscaler model"),
+        ("model_name", "upscale_model_name", "model"),
+    ),
+    (
+        ("controlnet 模型", "control net model", "controlnet model", "控制网模型", "控制网络模型"),
+        ("control_net_name", "controlnet_name", "model_name"),
+    ),
     (("模型权重", "model strength", "strength model", "strength_model"), ("strength_model",)),
     (("clip skip", "clip layer", "clip 层", "clip跳层"), ("stop_at_clip_layer",)),
     (("clip 权重", "clip强度", "clip strength", "strength_clip"), ("strength_clip",)),
@@ -587,17 +782,65 @@ WIDGET_ALIASES = (
     (("lora模型", "lora 模型", "lora model", "lora"), ("lora_name", "lora", "lora_model_name")),
     (("checkpoint", "ckpt", "大模型", "底模", "模型", "model"), ("ckpt_name", "checkpoint", "model_name", "unet_name")),
     (("vae",), ("vae_name", "vae")),
+    (
+        ("ipadapter 模型", "ipadapter model", "ipadapter", "ip adapter"),
+        ("ipadapter_file", "ipadapter_name", "ipadapter", "model_name"),
+    ),
     (("seed", "种子"), ("seed", "noise_seed")),
     (("steps", "步数"), ("steps",)),
     (
         ("cfg", "guidance", "guidance scale", "引导系数", "引导强度", "提示词相关度", "提示词引导"),
         ("cfg", "cfg_scale", "guidance_scale"),
     ),
-    (("sampler", "采样器"), ("sampler_name", "sampler")),
-    (("scheduler", "调度器"), ("scheduler",)),
+    (
+        ("sampler", "sampler method", "sampling method", "sampling algorithm", "采样器", "采样方法", "采样算法", "采样方式"),
+        ("sampler_name", "sampler"),
+    ),
+    (
+        ("scheduler", "scheduler method", "schedule method", "调度器", "调度方式", "调度方法", "调度策略"),
+        ("scheduler",),
+    ),
     (("denoise", "重绘幅度", "降噪", "去噪"), ("denoise",)),
+    (
+        (
+            "start percent",
+            "start_percent",
+            "start time",
+            "start_at",
+            "开始百分比",
+            "开始",
+            "起始百分比",
+            "起始",
+            "开始比例",
+            "起始比例",
+            "开始时间",
+            "起始时间",
+        ),
+        ("start_percent", "start", "start_at"),
+    ),
+    (
+        (
+            "end percent",
+            "end_percent",
+            "end time",
+            "end_at",
+            "结束百分比",
+            "结束",
+            "终止百分比",
+            "终止",
+            "结束比例",
+            "终止比例",
+            "结束时间",
+            "终止时间",
+        ),
+        ("end_percent", "end", "end_at"),
+    ),
     (("batch", "batch size", "批量", "批次"), ("batch_size", "batch")),
     (("fps", "frame rate", "帧率", "视频帧率"), ("frame_rate", "fps")),
+    (
+        ("loop count", "loop_count", "loops", "repeat count", "循环次数", "循环数", "重复次数", "重复播放次数"),
+        ("loop_count", "loops"),
+    ),
     (("frames", "frame count", "num_frames", "帧数", "视频帧数"), ("num_frames", "frames", "length")),
     (("width", "宽度"), ("width",)),
     (("height", "高度"), ("height",)),
@@ -650,6 +893,94 @@ def _widget_hint_map(node: dict) -> dict[str, dict]:
     return hints
 
 
+def _widget_accepts_implicit_number(widget: dict) -> bool:
+    value = widget.get("value")
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    return widget.get("name", "").lower() in {
+        "batch",
+        "batch_size",
+        "cfg",
+        "cfg_scale",
+        "denoise",
+        "end",
+        "end_at",
+        "end_percent",
+        "fps",
+        "frame_rate",
+        "frames",
+        "guidance_scale",
+        "height",
+        "length",
+        "loop_count",
+        "loops",
+        "noise_seed",
+        "num_frames",
+        "quality",
+        "seed",
+        "start",
+        "start_at",
+        "start_percent",
+        "steps",
+        "strength",
+        "strength_clip",
+        "strength_model",
+        "weight",
+        "width",
+    }
+
+
+def _widget_accepts_implicit_string(widget: dict) -> bool:
+    value = widget.get("value")
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return False
+    return widget.get("name", "").lower() in {
+        "checkpoint",
+        "ckpt_name",
+        "control_net_name",
+        "controlnet_name",
+        "crop",
+        "crop_mode",
+        "file_format",
+        "file_prefix",
+        "filename",
+        "filename_prefix",
+        "format",
+        "image",
+        "image_format",
+        "image_path",
+        "input_image",
+        "interpolation",
+        "ipadapter",
+        "ipadapter_file",
+        "ipadapter_name",
+        "lora",
+        "lora_model_name",
+        "lora_name",
+        "method",
+        "model",
+        "model_name",
+        "output_prefix",
+        "reference_image",
+        "resize_method",
+        "sampler",
+        "sampler_name",
+        "scheduler",
+        "unet_name",
+        "upscale_method",
+        "upscale_model_name",
+        "vae",
+        "vae_name",
+        "video_format",
+    }
+
+
+def _looks_like_explicit_assignment_fragment(value: str) -> bool:
+    return any(operator in value for operator in VALUE_SET_DELIMITERS)
+
+
 def _node_mentions_widget_hint(node: dict, text: str) -> bool:
     lowered = text.lower()
     for hint in _widget_hint_map(node):
@@ -662,6 +993,17 @@ def _node_mentions_widget_hint(node: dict, text: str) -> bool:
 
 def _nodes_matching_widget_hint(nodes: list[dict], text: str) -> list[dict]:
     return [node for node in nodes if _node_mentions_widget_hint(node, text)]
+
+
+def _select_mentioned_widget(node: dict, text: str) -> dict | None:
+    lowered = text.lower()
+    hints = _widget_hint_map(node)
+    for hint in sorted(hints, key=len, reverse=True):
+        if hint in {"text", "文本", "内容"}:
+            continue
+        if hint in lowered or hint in text:
+            return hints[hint]
+    return None
 
 
 def _combined_strength_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
@@ -692,26 +1034,140 @@ def _combined_strength_assignments(text: str, node: dict) -> list[tuple[dict, ob
     ]
 
 
+def _step_count_assignment(text: str, node: dict) -> list[tuple[dict, object]]:
+    lowered = text.lower()
+    if "步" not in text and "steps" not in lowered:
+        return []
+    if not any(term in lowered or term in text for term in ("用", "使用", "with")):
+        return []
+    match = re.search(r"(?:用|使用|with)\s*(\d+)\s*(?:步|steps?)", text, re.IGNORECASE)
+    if not match:
+        return []
+    widget = _find_widget_by_name(_node_widgets(node), ("steps",))
+    if widget is None:
+        return []
+    return [(widget, _coerce_widget_value(match.group(1), widget))]
+
+
+def _strip_use_assignment_suffix(value: str) -> str:
+    cleaned = re.sub(
+        r"\s*(?:作为|当作|as)\s*(?:文件名前缀|输出文件名前缀|输出前缀|保存前缀|filename prefix|file name prefix|output prefix)\s*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return _strip_value(cleaned)
+
+
+def _use_value_before_followup_assignment(value: str, node: dict) -> str:
+    for match in re.finditer(r"[，,;；]", value):
+        tail = value[match.end():]
+        if _select_mentioned_widget(node, tail) is not None:
+            return value[: match.start()]
+    return value
+
+
+def _use_widget_assignment(text: str, node: dict) -> list[tuple[dict, object]]:
+    if _step_count_assignment(text, node):
+        return []
+    match = re.search(r"(?:用|使用)\s*(.+)$", text, re.IGNORECASE)
+    if match is None:
+        match = re.search(r"\bwith\b\s*(.+)$", text, re.IGNORECASE)
+    if match is None:
+        return []
+    prefix = text[: match.start()]
+    widget = _select_mentioned_widget(node, prefix) or _select_mentioned_widget(node, text)
+    if widget is None:
+        return []
+    value = _strip_use_assignment_suffix(_use_value_before_followup_assignment(match.group(1), node))
+    if not value:
+        return []
+    return [(widget, _coerce_widget_value(value, widget))]
+
+
+def _merge_widget_assignments(*assignment_groups: list[tuple[dict, object]]) -> list[tuple[dict, object]]:
+    rows = []
+    seen = set()
+    for group in assignment_groups:
+        for widget, value in group:
+            name = widget.get("name")
+            if name in seen:
+                continue
+            seen.add(name)
+            rows.append((widget, value))
+    return rows
+
+
 def _widget_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     hints = _widget_hint_map(node)
     if not hints:
         return []
     hint_pattern = "|".join(re.escape(hint) for hint in sorted(hints, key=len, reverse=True))
-    assignment_operators = "|".join(re.escape(operator) for operator in (*VALUE_SET_DELIMITERS, "="))
-    pattern = re.compile(
+    assignment_operators = "|".join(
+        re.escape(operator) for operator in sorted(WIDGET_ASSIGNMENT_OPERATORS, key=len, reverse=True)
+    )
+    explicit_pattern = re.compile(
         rf"(?P<hint>{hint_pattern})\s*(?:{assignment_operators})\s*",
         re.IGNORECASE,
     )
-    matches = list(pattern.finditer(text))
+    implicit_number_pattern = re.compile(
+        rf"(?:^|[\s，,;；])\s*(?P<hint>{hint_pattern})\s*(?P<value>-?\d+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+    implicit_string_pattern = re.compile(
+        rf"(?:^|[\s，,;；])\s*(?P<hint>{hint_pattern})\s+(?P<value>[^，,;；]+)",
+        re.IGNORECASE,
+    )
+    matches = [
+        {
+            "start": match.start(),
+            "end": match.end(),
+            "hint": match.group("hint").lower(),
+            "value_start": match.end(),
+            "value": None,
+        }
+        for match in explicit_pattern.finditer(text)
+    ]
+    for match in implicit_number_pattern.finditer(text):
+        hint = match.group("hint").lower()
+        widget = hints[hint]
+        if not _widget_accepts_implicit_number(widget):
+            continue
+        matches.append(
+            {
+                "start": match.start("hint"),
+                "end": match.end(),
+                "hint": hint,
+                "value_start": match.start("value"),
+                "value": match.group("value"),
+            }
+        )
+    for match in implicit_string_pattern.finditer(text):
+        hint = match.group("hint").lower()
+        widget = hints[hint]
+        if not _widget_accepts_implicit_string(widget):
+            continue
+        if _looks_like_explicit_assignment_fragment(match.group("value")):
+            continue
+        matches.append(
+            {
+                "start": match.start("hint"),
+                "end": match.end(),
+                "hint": hint,
+                "value_start": match.start("value"),
+                "value": match.group("value"),
+            }
+        )
+    matches.sort(key=lambda row: (row["start"], row["end"]))
     rows = []
     seen_widgets = set()
     for index, match in enumerate(matches):
-        value_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        raw_value = text[match.end():value_end]
+        value_end = matches[index + 1]["start"] if index + 1 < len(matches) else len(text)
+        raw_value = match["value"] if match["value"] is not None else text[match["value_start"]:value_end]
         value = _strip_value(raw_value)
         if not value:
             continue
-        widget = hints[match.group("hint").lower()]
+        widget = hints[match["hint"]]
         if widget["name"] in seen_widgets:
             continue
         seen_widgets.add(widget["name"])
@@ -740,11 +1196,20 @@ def _mentions_size(text: str) -> bool:
             "高度和宽度",
             "size",
             "resolution",
+            "resize",
             "width height",
             "height width",
             "width/height",
             "w/h",
         )
+    )
+
+
+def _looks_like_size_value(value: str) -> bool:
+    return bool(
+        re.search(r"\d+(?:\.\d+)?\s*[xX×*]\s*\d+(?:\.\d+)?", value)
+        or re.search(r"\b(?:720|1080)\s*p\b", value, re.IGNORECASE)
+        or re.search(r"\d+(?:\.\d+)?\s*[:：]\s*\d+(?:\.\d+)?", value)
     )
 
 
@@ -768,10 +1233,10 @@ def _current_dimension(widget: dict | None) -> int | None:
 
 def _size_assignments(text: str, node: dict) -> list[tuple[dict, object]]:
     lowered = text.lower()
-    if not _mentions_size(text):
-        return []
     value = _extract_value_after_set(text)
     if not value:
+        return []
+    if not _mentions_size(text) and not _looks_like_size_value(value):
         return []
     width, height = _size_widgets(node)
     if width is None or height is None:
@@ -812,7 +1277,7 @@ def _extract_widget_delta(text: str) -> int | float | None:
     direction = None
     if any(
         term in lowered or term in text
-        for term in ("提高", "调高", "增加", "raise", "increase", "higher")
+        for term in ("提高", "调高", "增加", "加", "raise", "increase", "higher")
     ):
         direction = 1
     if any(
@@ -829,11 +1294,34 @@ def _extract_widget_delta(text: str) -> int | float | None:
     return int(delta) if delta.is_integer() else delta
 
 
+def _extract_widget_multiplier(text: str) -> int | float | None:
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("减半", "half", "halve")):
+        return 0.5
+    if any(term in lowered or term in text for term in ("翻倍", "加倍", "double")):
+        return 2
+    match = re.search(r"(?:乘以|乘|×|\*)\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    if match:
+        value = float(match.group(1))
+        return int(value) if value.is_integer() else value
+    return None
+
+
 def _adjust_widget_value(widget: dict, delta: int | float) -> object | None:
     current = widget.get("value")
     if isinstance(current, bool) or not isinstance(current, (int, float)):
         return None
     value = current + delta
+    if isinstance(current, int) and float(value).is_integer():
+        return int(value)
+    return value
+
+
+def _scale_widget_value(widget: dict, multiplier: int | float) -> object | None:
+    current = widget.get("value")
+    if isinstance(current, bool) or not isinstance(current, (int, float)):
+        return None
+    value = current * multiplier
     if isinstance(current, int) and float(value).is_integer():
         return int(value)
     return value
@@ -914,6 +1402,20 @@ def _remove_text_value(current: object, fragment: str) -> str | None:
     return value.strip(" \t\r\n,，")
 
 
+def _extract_text_remove_value(text: str) -> str | None:
+    value = _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS)
+    if value:
+        return value
+    for delimiter in TEXT_REMOVE_DELIMITERS:
+        if delimiter not in text:
+            continue
+        before = text.rsplit(delimiter, 1)[0]
+        match = re.search(r"(?:里面|里的|里|中的|中|from)\s*([^,，;；]+?)\s*$", before, re.IGNORECASE)
+        if match:
+            return _strip_value(match.group(1))
+    return None
+
+
 def _looks_like_text_clear(text: str) -> bool:
     lowered = text.lower()
     if not any(term in lowered or term in text for term in TEXT_CLEAR_TERMS):
@@ -948,7 +1450,7 @@ def _text_edit_actions_for_node(text: str, node: dict) -> list[dict]:
         return clear_actions
 
     append_value = _extract_value_after_delimiters(text, TEXT_APPEND_DELIMITERS)
-    remove_value = _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS)
+    remove_value = _extract_text_remove_value(text)
     if not append_value and not remove_value:
         return []
     widget = _select_widget(node, text)
@@ -973,7 +1475,7 @@ def _text_edit_actions_for_node(text: str, node: dict) -> list[dict]:
 
 
 def _looks_like_widget_text_removal(text: str) -> bool:
-    if not _extract_value_after_delimiters(text, TEXT_REMOVE_DELIMITERS):
+    if not _extract_text_remove_value(text):
         return False
     lowered = text.lower()
     return any(term in lowered or term in text for term in ("从", "里", "里面", "文本", "内容", "提示词", "prompt", "text"))
@@ -990,9 +1492,26 @@ def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
 
     size_assignments = _size_assignments(text, node)
     if size_assignments:
-        assignments = size_assignments
+        assignments = _merge_widget_assignments(
+            size_assignments,
+            _widget_assignments(text, node),
+        )
     else:
-        assignments = _combined_strength_assignments(text, node)
+        assignments = _step_count_assignment(text, node)
+        if assignments:
+            assignments = _merge_widget_assignments(
+                assignments,
+                _widget_assignments(text, node),
+            )
+        if not assignments:
+            use_assignments = _use_widget_assignment(text, node)
+            if use_assignments:
+                assignments = _merge_widget_assignments(
+                    use_assignments,
+                    _widget_assignments(text, node),
+                )
+        if not assignments:
+            assignments = _combined_strength_assignments(text, node)
         if not assignments:
             assignments = _widget_assignments(text, node)
     if assignments:
@@ -1006,6 +1525,25 @@ def _widget_edit_actions_for_node(text: str, node: dict) -> list[dict]:
                 },
             }
             for widget, value in assignments
+        ]
+
+    multiplier = _extract_widget_multiplier(text)
+    if multiplier is not None:
+        widget = _select_widget(node, text)
+        if widget is None:
+            return []
+        value = _scale_widget_value(widget, multiplier)
+        if value is None:
+            return []
+        return [
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": node.get("id"),
+                    "widget": widget["name"],
+                    "value": value,
+                },
+            }
         ]
 
     delta = _extract_widget_delta(text)
@@ -1139,6 +1677,57 @@ def _copy_widget_phrases(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _copy_all_widget_settings_requested(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered or term in text
+        for term in (
+            "所有设置",
+            "全部设置",
+            "所有参数",
+            "全部参数",
+            "整组设置",
+            "整套设置",
+            "设置",
+            "参数",
+            "配置",
+            "all settings",
+            "all parameters",
+            "all params",
+            "all widgets",
+            "settings",
+            "parameters",
+            "params",
+            "configuration",
+        )
+    )
+
+
+def _copy_common_widget_actions(source: dict, target: dict) -> list[dict]:
+    target_widgets = {widget["name"].lower(): widget for widget in _node_widgets(target)}
+    actions = []
+    seen = set()
+    for source_widget in _node_widgets(source):
+        source_name = source_widget["name"].lower()
+        if source_name in seen:
+            continue
+        target_widget = target_widgets.get(source_name)
+        if target_widget is None:
+            continue
+        seen.add(source_name)
+        actions.append(
+            {
+                "type": "graph.set_widget",
+                "payload": {
+                    "node_id": target.get("id"),
+                    "widget": target_widget["name"],
+                    "value": source_widget.get("value"),
+                },
+            }
+        )
+    return actions
+
+
 def _plan_graph_copy_widget_value(text: str, context: dict) -> dict | None:
     phrases = _copy_widget_phrases(text)
     if phrases is None:
@@ -1146,13 +1735,25 @@ def _plan_graph_copy_widget_value(text: str, context: dict) -> dict | None:
     source_phrase, target_phrase = phrases
     nodes = _graph_nodes(context)
     links = _graph_links(context)
-    source = _select_node(nodes, source_phrase, links)
-    target = _select_node(nodes, target_phrase, links)
+    source = _select_node_preferring_label(nodes, source_phrase, links)
+    target = _select_node_preferring_label(nodes, target_phrase, links)
     if source is None or target is None or source.get("id") == target.get("id"):
         return None
+    if _copy_all_widget_settings_requested(source_phrase):
+        actions = _copy_common_widget_actions(source, target)
+        if not actions:
+            return None
+        return {
+            "summary": f"Copy {len(actions)} widget setting(s) from node {source.get('id')} to node {target.get('id')}",
+            "actions": actions,
+        }
     source_widget = _select_widget(source, source_phrase)
-    target_widget = _select_widget(target, target_phrase)
-    if source_widget is None or target_widget is None:
+    if source_widget is None:
+        return None
+    target_widget = _find_widget_by_name(_node_widgets(target), (source_widget["name"],))
+    if target_widget is None:
+        target_widget = _select_widget(target, target_phrase)
+    if target_widget is None:
         return None
     return {
         "summary": f"Copy widget from node {source.get('id')} to node {target.get('id')}",
@@ -1346,6 +1947,401 @@ def _plan_graph_set_mode(text: str, context: dict) -> dict | None:
     }
 
 
+def _collapsed_state_from_text(text: str) -> bool | None:
+    lowered = text.lower()
+    if any(term in lowered or term in text for term in ("取消折叠", "展开", "expand", "unfold")):
+        return False
+    if any(term in lowered or term in text for term in ("折叠", "收起", "collapse", "fold")):
+        return True
+    return None
+
+
+def _plan_graph_set_collapsed(text: str, context: dict) -> dict | None:
+    collapsed = _collapsed_state_from_text(text)
+    if collapsed is None:
+        return None
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
+    if bulk_nodes:
+        return {
+            "summary": f"{'Collapse' if collapsed else 'Expand'} {len(bulk_nodes)} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.set_collapsed",
+                    "payload": {"node_id": node.get("id"), "collapsed": collapsed},
+                }
+                for node in bulk_nodes
+            ],
+        }
+    node = _select_node(nodes, text, links)
+    if node is None:
+        return None
+    return {
+        "summary": f"{'Collapse' if collapsed else 'Expand'} graph node {node.get('id')}",
+        "actions": [
+            {
+                "type": "graph.set_collapsed",
+                "payload": {"node_id": node.get("id"), "collapsed": collapsed},
+            }
+        ],
+    }
+
+
+def _graph_neighborhood_direction(text: str) -> str | None:
+    lowered = text.lower()
+    if any(
+        term in lowered or term in text
+        for term in (
+            "下游",
+            "后续节点",
+            "后面的节点",
+            "后面的所有节点",
+            "后面所有节点",
+            "后面的",
+            "后面",
+            "之后的节点",
+            "之后所有节点",
+            "之后",
+            "downstream",
+            "following nodes",
+            "nodes after",
+            "after this node",
+            "after the node",
+        )
+    ):
+        return "downstream"
+    if any(
+        term in lowered or term in text
+        for term in (
+            "上游",
+            "前面的节点",
+            "前面的所有节点",
+            "前面所有节点",
+            "前面的",
+            "前面",
+            "之前的节点",
+            "之前所有节点",
+            "之前",
+            "upstream",
+            "previous nodes",
+            "nodes before",
+            "before this node",
+            "before the node",
+        )
+    ):
+        return "upstream"
+    return None
+
+
+def _reachable_graph_node_ids(
+    anchor_id: object,
+    links: list[dict],
+    direction: str,
+) -> set[object]:
+    adjacency: dict[object, list[object]] = {}
+    for link in links:
+        origin_id = link.get("origin_id")
+        target_id = link.get("target_id")
+        if origin_id is None or target_id is None:
+            continue
+        if direction == "upstream":
+            origin_id, target_id = target_id, origin_id
+        adjacency.setdefault(origin_id, []).append(target_id)
+
+    seen = set()
+    queue = list(adjacency.get(anchor_id, []))
+    while queue:
+        node_id = queue.pop(0)
+        if node_id == anchor_id or node_id in seen:
+            continue
+        seen.add(node_id)
+        queue.extend(adjacency.get(node_id, []))
+    return seen
+
+
+GRAPH_NEIGHBORHOOD_ANCHOR_MARKERS = {
+    "downstream": (
+        "后面的所有节点",
+        "后面所有节点",
+        "后面的节点",
+        "后续节点",
+        "之后的节点",
+        "之后所有节点",
+        "下游节点",
+        "后面的",
+        "后面",
+        "之后",
+        "下游",
+        "downstream",
+        "following nodes",
+        "after this node",
+        "after the node",
+    ),
+    "upstream": (
+        "前面的所有节点",
+        "前面所有节点",
+        "前面的节点",
+        "之前的节点",
+        "之前所有节点",
+        "上游节点",
+        "前面的",
+        "前面",
+        "之前",
+        "上游",
+        "upstream",
+        "previous nodes",
+        "before this node",
+        "before the node",
+    ),
+}
+
+
+def _graph_neighborhood_anchor_phrase(text: str, direction: str) -> str | None:
+    lowered = text.lower()
+    candidates = []
+    for marker in GRAPH_NEIGHBORHOOD_ANCHOR_MARKERS[direction]:
+        haystack = lowered if marker.isascii() else text
+        needle = marker.lower() if marker.isascii() else marker
+        index = haystack.find(needle)
+        if index > 0:
+            candidates.append(index)
+    if not candidates:
+        return None
+    phrase = text[: min(candidates)].strip(" ，,。:：")
+    return phrase or None
+
+
+def _select_graph_neighborhood_nodes(
+    text: str,
+    context: dict,
+) -> tuple[str, list[dict]] | None:
+    direction = _graph_neighborhood_direction(text)
+    if direction is None:
+        return None
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    anchor_phrase = _graph_neighborhood_anchor_phrase(text, direction)
+    anchor = None
+    if anchor_phrase is not None:
+        anchor = _select_node_preferring_label(nodes, anchor_phrase, links)
+    if anchor is None:
+        anchor = _select_node_preferring_label(nodes, text, links)
+    if anchor is None:
+        return None
+    reachable_ids = _reachable_graph_node_ids(anchor.get("id"), links, direction)
+    if not reachable_ids:
+        return None
+    return direction, [node for node in nodes if node.get("id") in reachable_ids]
+
+
+def _disconnect_all_scope_from_text(text: str) -> str | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("断开", "清空", "移除连接", "disconnect")):
+        return None
+    if any(term in lowered or term in text for term in ("所有输入", "all inputs", "all input")):
+        return "inputs"
+    if any(term in lowered or term in text for term in ("所有输出", "all outputs", "all output")):
+        return "outputs"
+    if any(
+        term in lowered or term in text
+        for term in ("所有连接", "所有连线", "全部连接", "all links", "all connections")
+    ):
+        return "all"
+    return None
+
+
+def _disconnect_payload_key_for_scope(scope: str) -> str:
+    return {
+        "inputs": "target_node_id",
+        "outputs": "origin_node_id",
+        "all": "node_id",
+    }[scope]
+
+
+def _plan_graph_neighborhood_action(text: str, context: dict) -> dict | None:
+    selected = _select_graph_neighborhood_nodes(text, context)
+    if selected is None:
+        return None
+    direction, nodes = selected
+    lowered = text.lower()
+
+    if any(term in lowered or term in text for term in ("删除", "删掉", "移除", "delete", "remove")):
+        if _looks_like_widget_text_removal(text):
+            return None
+        return {
+            "summary": f"Delete {len(nodes)} {direction} graph node(s)",
+            "actions": [
+                {"type": "graph.delete_node", "payload": {"node_id": node.get("id")}}
+                for node in nodes
+            ],
+        }
+
+    if any(term in lowered or term in text for term in ("复制", "克隆", "duplicate", "clone")):
+        return {
+            "summary": f"Duplicate {len(nodes)} {direction} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.duplicate_node",
+                    "payload": {"node_id": node.get("id"), "offset": [40, 40], "select": False},
+                }
+                for node in nodes
+            ],
+        }
+
+    disconnect_scope = _disconnect_all_scope_from_text(text)
+    if disconnect_scope is not None:
+        payload_key = _disconnect_payload_key_for_scope(disconnect_scope)
+        return {
+            "summary": f"Disconnect {disconnect_scope} on {len(nodes)} {direction} graph node(s)",
+            "actions": [
+                {"type": "graph.disconnect", "payload": {payload_key: node.get("id")}}
+                for node in nodes
+            ],
+        }
+
+    widget_actions = []
+    for node in nodes:
+        widget_actions.extend(_widget_edit_actions_for_node(text, node))
+    if widget_actions:
+        return {
+            "summary": f"Set widget(s) on {len(nodes)} {direction} graph node(s)",
+            "actions": widget_actions,
+        }
+
+    if _mentions_color_action(text):
+        color = _extract_node_color(text)
+        if color is not None:
+            return {
+                "summary": f"Color {len(nodes)} {direction} graph node(s)",
+                "actions": [_set_color_action(node, color) for node in nodes],
+            }
+
+    mode = _graph_mode_from_text(text)
+    if mode is not None:
+        return {
+            "summary": f"Set {len(nodes)} {direction} graph node(s) mode to {mode}",
+            "actions": [
+                {"type": "graph.set_mode", "payload": {"node_id": node.get("id"), "mode": mode}}
+                for node in nodes
+            ],
+        }
+
+    collapsed = _collapsed_state_from_text(text)
+    if collapsed is not None:
+        return {
+            "summary": f"{'Collapse' if collapsed else 'Expand'} {len(nodes)} {direction} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.set_collapsed",
+                    "payload": {"node_id": node.get("id"), "collapsed": collapsed},
+                }
+                for node in nodes
+            ],
+        }
+
+    alignment_axis = _alignment_axis(text)
+    if alignment_axis is not None:
+        actions = _align_graph_node_actions(nodes, alignment_axis)
+        if actions:
+            return {
+                "summary": f"Align {len(nodes)} {direction} graph node(s)",
+                "actions": actions,
+            }
+
+    distribution_axis = _distribution_axis(text)
+    if distribution_axis is not None:
+        actions = _distribute_graph_node_actions(nodes, distribution_axis)
+        if actions:
+            return {
+                "summary": f"Distribute {len(nodes)} {direction} graph node(s)",
+                "actions": actions,
+            }
+
+    delta = _extract_move_delta(text)
+    if delta is not None:
+        actions = []
+        for node in nodes:
+            current = _node_position(node)
+            actions.append(
+                {
+                    "type": "graph.set_position",
+                    "payload": {
+                        "node_id": node.get("id"),
+                        "pos": [current[0] + delta[0], current[1] + delta[1]],
+                    },
+                }
+            )
+        return {
+            "summary": f"Move {len(nodes)} {direction} graph node(s)",
+            "actions": actions,
+        }
+
+    focus = _graph_select_focus(text)
+    if focus is not None:
+        return {
+            "summary": f"{'Focus' if focus else 'Select'} {len(nodes)} {direction} graph node(s)",
+            "actions": [
+                {
+                    "type": "graph.select_nodes",
+                    "payload": {"node_ids": [node.get("id") for node in nodes], "focus": focus},
+                }
+            ],
+        }
+    return None
+
+
+def _mentions_node_box_size(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered or term in text
+        for term in (
+            "节点框",
+            "节点面板",
+            "节点窗口",
+            "node box",
+            "node panel",
+            "node size",
+            "graph node size",
+            "canvas node size",
+        )
+    )
+
+
+def _extract_node_box_size(text: str) -> list[int | float] | None:
+    if not _mentions_node_box_size(text):
+        return None
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", text)
+    if not matches:
+        return None
+    width, height = matches[-1]
+    return [_number_value(width), _number_value(height)]
+
+
+def _plan_graph_set_size(text: str, context: dict) -> dict | None:
+    size = _extract_node_box_size(text)
+    if size is None:
+        return None
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    bulk_nodes = _select_bulk_nodes(nodes, text, links)
+    if bulk_nodes:
+        return {
+            "summary": f"Resize {len(bulk_nodes)} graph node box(es)",
+            "actions": [
+                {"type": "graph.set_size", "payload": {"node_id": node.get("id"), "size": size}}
+                for node in bulk_nodes
+            ],
+        }
+    node = _select_node(nodes, text, links)
+    if node is None:
+        return None
+    return {
+        "summary": f"Resize graph node {node.get('id')} box",
+        "actions": [{"type": "graph.set_size", "payload": {"node_id": node.get("id"), "size": size}}],
+    }
+
+
 def _extract_title_value(text: str) -> str | None:
     for delimiter in (
         "重命名为",
@@ -1440,6 +2436,106 @@ def _extract_move_delta(text: str) -> list[int | float] | None:
     return [direction[0] * distance, direction[1] * distance]
 
 
+def _relative_position_relation(value: str) -> str | None:
+    lowered = value.lower()
+    if any(term in lowered or term in value for term in ("右边", "右侧", "右面", "右方", "right of")):
+        return "right"
+    if any(term in lowered or term in value for term in ("左边", "左侧", "左面", "左方", "left of")):
+        return "left"
+    if any(
+        term in lowered or term in value
+        for term in ("下面", "下方", "下边", "below", "under", "beneath")
+    ):
+        return "below"
+    if any(term in lowered or term in value for term in ("上面", "上方", "上边", "above", "over")):
+        return "above"
+    return None
+
+
+def _clean_relative_node_phrase(value: str) -> str:
+    cleaned = _strip_value(value)
+    cleaned = re.sub(r"^(?:the\s+)", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s*(?:的)?(?:节点|node)\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    return _strip_value(cleaned)
+
+
+def _extract_relative_position_request(text: str) -> tuple[str, str, str] | None:
+    relation_terms = (
+        "右边",
+        "右侧",
+        "右面",
+        "右方",
+        "左边",
+        "左侧",
+        "左面",
+        "左方",
+        "下面",
+        "下方",
+        "下边",
+        "上面",
+        "上方",
+        "上边",
+    )
+    relation_pattern = "|".join(re.escape(term) for term in relation_terms)
+    chinese_pattern = re.compile(
+        rf"^\s*(?:请|帮我)?\s*(?:把|将)?\s*"
+        rf"(?P<source>.+?)\s*(?:移动到|移到|挪到|放到|放在)\s*"
+        rf"(?P<target>.+?)\s*(?:的)?\s*(?P<relation>{relation_pattern})\s*$"
+    )
+    match = chinese_pattern.search(text)
+    if match:
+        relation = _relative_position_relation(match.group("relation"))
+        source = _clean_relative_node_phrase(match.group("source"))
+        target = _clean_relative_node_phrase(match.group("target"))
+        if relation and source and target:
+            return source, target, relation
+
+    english_pattern = re.compile(
+        r"^\s*(?:please\s+)?(?:move|put|place)\s+"
+        r"(?P<source>.+?)\s+(?:to\s+|on\s+|at\s+)?(?:the\s+)?"
+        r"(?P<relation>right of|left of|below|under|beneath|above|over)\s+"
+        r"(?P<target>.+?)\s*$",
+        re.IGNORECASE,
+    )
+    match = english_pattern.search(text)
+    if not match:
+        return None
+    relation = _relative_position_relation(match.group("relation"))
+    source = _clean_relative_node_phrase(match.group("source"))
+    target = _clean_relative_node_phrase(match.group("target"))
+    if not relation or not source or not target:
+        return None
+    return source, target, relation
+
+
+def _relative_position(anchor: list[int | float], relation: str) -> list[int | float]:
+    if relation == "right":
+        return [_position_number(anchor[0] + RELATIVE_NODE_X_GAP), anchor[1]]
+    if relation == "left":
+        return [_position_number(anchor[0] - RELATIVE_NODE_X_GAP), anchor[1]]
+    if relation == "below":
+        return [anchor[0], _position_number(anchor[1] + RELATIVE_NODE_Y_GAP)]
+    return [anchor[0], _position_number(anchor[1] - RELATIVE_NODE_Y_GAP)]
+
+
+def _plan_relative_graph_position(text: str, nodes: list[dict], links: list[dict]) -> dict | None:
+    request = _extract_relative_position_request(text)
+    if request is None:
+        return None
+    source_phrase, target_phrase, relation = request
+    source = _select_node_preferring_label(nodes, source_phrase, links)
+    target = _select_node_preferring_label(nodes, target_phrase, links)
+    if source is None or target is None or source.get("id") == target.get("id"):
+        return None
+    pos = _relative_position(_node_position(target), relation)
+    return {
+        "summary": f"Move graph node {source.get('id')} {relation} of node {target.get('id')}",
+        "actions": [
+            {"type": "graph.set_position", "payload": {"node_id": source.get("id"), "pos": pos}}
+        ],
+    }
+
+
 def _alignment_axis(text: str) -> str | None:
     lowered = text.lower()
     if any(term in lowered or term in text for term in ("左对齐", "align left", "left align")):
@@ -1477,27 +2573,34 @@ def _aligned_position(axis: str, pos: list[int | float], reference: int | float)
     return [pos[0], reference]
 
 
+def _align_graph_node_actions(nodes: list[dict], axis: str) -> list[dict] | None:
+    if len(nodes) < 2:
+        return None
+    positions = [_node_position(node) for node in nodes]
+    reference = _alignment_reference(axis, positions)
+    return [
+        {
+            "type": "graph.set_position",
+            "payload": {
+                "node_id": node.get("id"),
+                "pos": _aligned_position(axis, pos, reference),
+            },
+        }
+        for node, pos in zip(nodes, positions)
+    ]
+
+
 def _plan_graph_align_nodes(text: str, context: dict) -> dict | None:
     axis = _alignment_axis(text)
     if axis is None:
         return None
     nodes = _select_bulk_nodes(_graph_nodes(context), text, _graph_links(context))
-    if len(nodes) < 2:
+    actions = _align_graph_node_actions(nodes, axis)
+    if actions is None:
         return None
-    positions = [_node_position(node) for node in nodes]
-    reference = _alignment_reference(axis, positions)
     return {
         "summary": f"Align {len(nodes)} graph node(s)",
-        "actions": [
-            {
-                "type": "graph.set_position",
-                "payload": {
-                    "node_id": node.get("id"),
-                    "pos": _aligned_position(axis, pos, reference),
-                },
-            }
-            for node, pos in zip(nodes, positions)
-        ],
+        "actions": actions,
     }
 
 
@@ -1515,11 +2618,7 @@ def _distribution_axis(text: str) -> str | None:
     return None
 
 
-def _plan_graph_distribute_nodes(text: str, context: dict) -> dict | None:
-    axis = _distribution_axis(text)
-    if axis is None:
-        return None
-    nodes = _select_bulk_nodes(_graph_nodes(context), text, _graph_links(context))
+def _distribute_graph_node_actions(nodes: list[dict], axis: str) -> list[dict] | None:
     if len(nodes) < 3:
         return None
     axis_index = 0 if axis == "horizontal" else 1
@@ -1527,30 +2626,131 @@ def _plan_graph_distribute_nodes(text: str, context: dict) -> dict | None:
     first = rows[0][1][axis_index]
     last = rows[-1][1][axis_index]
     step = (last - first) / (len(rows) - 1)
+    return [
+        {
+            "type": "graph.set_position",
+            "payload": {
+                "node_id": node.get("id"),
+                "pos": [
+                    _position_number(first + step * index) if axis_index == 0 else pos[0],
+                    _position_number(first + step * index) if axis_index == 1 else pos[1],
+                ],
+            },
+        }
+        for index, (node, pos) in enumerate(rows)
+    ]
+
+
+def _plan_graph_distribute_nodes(text: str, context: dict) -> dict | None:
+    axis = _distribution_axis(text)
+    if axis is None:
+        return None
+    nodes = _select_bulk_nodes(_graph_nodes(context), text, _graph_links(context))
+    actions = _distribute_graph_node_actions(nodes, axis)
+    if actions is None:
+        return None
     return {
-        "summary": f"Distribute {len(rows)} graph node(s)",
-        "actions": [
+        "summary": f"Distribute {len(nodes)} graph node(s)",
+        "actions": actions,
+    }
+
+
+def _mentions_auto_layout(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered or term in text
+        for term in (
+            "整理",
+            "自动排版",
+            "自动布局",
+            "重新布局",
+            "排版一下",
+            "布局一下",
+            "tidy",
+            "auto layout",
+            "arrange workflow",
+            "layout workflow",
+            "organize workflow",
+            "clean up workflow",
+        )
+    )
+
+
+def _auto_layout_depths(nodes: list[dict], links: list[dict]) -> dict[object, int]:
+    node_ids = {node.get("id") for node in nodes if node.get("id") is not None}
+    incoming_counts = {node_id: 0 for node_id in node_ids}
+    outgoing: dict[object, list[object]] = {node_id: [] for node_id in node_ids}
+    for link in links:
+        origin_id = link.get("origin_id")
+        target_id = link.get("target_id")
+        if origin_id not in node_ids or target_id not in node_ids or origin_id == target_id:
+            continue
+        outgoing[origin_id].append(target_id)
+        incoming_counts[target_id] += 1
+
+    depths = {node_id: 0 for node_id, count in incoming_counts.items() if count == 0}
+    queue = [node.get("id") for node in nodes if node.get("id") in depths]
+    remaining_incoming = dict(incoming_counts)
+    while queue:
+        origin_id = queue.pop(0)
+        origin_depth = depths.get(origin_id, 0)
+        for target_id in outgoing.get(origin_id, []):
+            depths[target_id] = max(depths.get(target_id, 0), origin_depth + 1)
+            remaining_incoming[target_id] -= 1
+            if remaining_incoming[target_id] == 0:
+                queue.append(target_id)
+
+    for node_id in node_ids:
+        depths.setdefault(node_id, 0)
+    return depths
+
+
+def _plan_graph_auto_layout(text: str, context: dict) -> dict | None:
+    if not _mentions_auto_layout(text):
+        return None
+    nodes = [node for node in _graph_nodes(context) if node.get("id") is not None]
+    if len(nodes) < 2:
+        return None
+    positions = [_node_position(node) for node in nodes]
+    origin_x = min(pos[0] for pos in positions)
+    origin_y = min(pos[1] for pos in positions)
+    depths = _auto_layout_depths(nodes, _graph_links(context))
+    layer_counts: dict[int, int] = {}
+    actions = []
+    for node in nodes:
+        depth = depths.get(node.get("id"), 0)
+        row = layer_counts.get(depth, 0)
+        layer_counts[depth] = row + 1
+        actions.append(
             {
                 "type": "graph.set_position",
                 "payload": {
                     "node_id": node.get("id"),
                     "pos": [
-                        _position_number(first + step * index) if axis_index == 0 else pos[0],
-                        _position_number(first + step * index) if axis_index == 1 else pos[1],
+                        _position_number(origin_x + RELATIVE_NODE_X_GAP * depth),
+                        _position_number(origin_y + RELATIVE_NODE_Y_GAP * row),
                     ],
                 },
             }
-            for index, (node, pos) in enumerate(rows)
-        ],
+        )
+    return {
+        "summary": f"Auto layout {len(nodes)} graph node(s)",
+        "actions": actions,
     }
 
 
 def _plan_graph_set_position(text: str, context: dict) -> dict | None:
     lowered = text.lower()
-    if not any(term in lowered or term in text for term in ("移动", "移到", "挪", "move")):
+    if not any(
+        term in lowered or term in text
+        for term in ("移动", "移到", "挪", "放到", "放在", "move", "put", "place")
+    ):
         return None
     nodes = _graph_nodes(context)
     links = _graph_links(context)
+    relative_plan = _plan_relative_graph_position(text, nodes, links)
+    if relative_plan is not None:
+        return relative_plan
     bulk_nodes = _select_bulk_nodes(nodes, text, links)
     if bulk_nodes:
         delta = _extract_move_delta(text)
@@ -1616,7 +2816,7 @@ def _plan_graph_select_node(text: str, context: dict) -> dict | None:
     focus = _graph_select_focus(text)
     if focus is None:
         return None
-    if focus is False and _extract_value_after_set(text):
+    if _extract_value_after_set(text):
         return None
     nodes = _graph_nodes(context)
     links = _graph_links(context)
@@ -1685,8 +2885,38 @@ ADD_NODE_ALIASES = (
         None,
     ),
     (
+        ("vae 解码", "vae解码", "vae decode", "decode vae", "latent 转图像", "latent to image"),
+        "VAEDecode",
+        None,
+    ),
+    (
+        ("vae 编码", "vae编码", "vae encode", "encode vae", "图像转 latent", "image to latent"),
+        "VAEEncode",
+        None,
+    ),
+    (
         ("vae 加载器", "vae加载器", "vae loader", "load vae"),
         "VAELoader",
+        None,
+    ),
+    (
+        ("加载图片", "导入图片", "输入图片", "输入图像", "load image", "image input"),
+        "LoadImage",
+        None,
+    ),
+    (
+        ("图像缩放", "图片缩放", "缩放节点", "image scale", "image resize", "resize image"),
+        "ImageScale",
+        None,
+    ),
+    (
+        ("超分模型加载器", "超分模型", "放大模型加载器", "upscale model loader", "load upscale model"),
+        "UpscaleModelLoader",
+        None,
+    ),
+    (
+        ("controlnet 模型加载器", "controlnet 加载器", "controlnet loader", "load controlnet model", "控制网模型加载器"),
+        "ControlNetLoader",
         None,
     ),
 )
@@ -1700,19 +2930,262 @@ def _node_type_alias_to_add(text: str) -> tuple[str, str | None] | None:
     return None
 
 
-def _extract_node_type_to_add(text: str) -> str | None:
-    alias = _node_type_alias_to_add(text)
-    if alias is not None:
-        return alias[0]
+def _normalize_node_type_phrase(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _registered_node_type_for_phrase(context: dict, phrase: str) -> str | None:
+    cleaned = _strip_value(phrase)
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    compact = _normalize_node_type_phrase(cleaned)
+    if not compact:
+        return None
+    for row in _graph_node_types(context):
+        labels = [row.get("type"), row.get("title"), row.get("name"), row.get("display_name")]
+        for label in labels:
+            if not isinstance(label, str) or not label:
+                continue
+            if label.lower() == lowered or _normalize_node_type_phrase(label) == compact:
+                return row["type"]
+    return None
+
+
+def _node_type_row(context: dict, node_type: str) -> dict | None:
+    for row in _graph_node_types(context):
+        if row.get("type") == node_type:
+            return row
+    return None
+
+
+def _schema_input_type(raw: object) -> object:
+    if isinstance(raw, dict):
+        return raw.get("type")
+    if not isinstance(raw, list) or not raw:
+        return None
+    first = raw[0]
+    if isinstance(first, list):
+        return "COMBO"
+    if isinstance(first, str):
+        return first
+    return None
+
+
+def _input_rows_from_schema_mapping(row: dict) -> list[dict]:
+    node_input = row.get("input")
+    if not isinstance(node_input, dict):
+        return []
+    input_order = row.get("input_order")
+    rows = []
+    for section in ("required", "optional"):
+        section_inputs = node_input.get(section)
+        if not isinstance(section_inputs, dict):
+            continue
+        if isinstance(input_order, dict) and isinstance(input_order.get(section), list):
+            names = input_order[section]
+        else:
+            names = list(section_inputs.keys())
+        for name in names:
+            if not isinstance(name, str):
+                continue
+            rows.append({"name": name, "type": _schema_input_type(section_inputs.get(name))})
+    return rows
+
+
+def _node_type_input_rows(context: dict, node_type: str) -> list[dict]:
+    row = _node_type_row(context, node_type)
+    if row is None:
+        return []
+    explicit_inputs = row.get("inputs")
+    if isinstance(explicit_inputs, list):
+        return [
+            item
+            for item in explicit_inputs[:MAX_PLANNER_NODE_TYPE_INPUTS]
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        ]
+    rows = _input_rows_from_schema_mapping(row)
+    if rows:
+        return rows[:MAX_PLANNER_NODE_TYPE_INPUTS]
+    input_order = row.get("input_order")
+    if not isinstance(input_order, dict):
+        return []
+    names = []
+    for section in ("required", "optional"):
+        values = input_order.get(section)
+        if isinstance(values, list):
+            names.extend(value for value in values if isinstance(value, str))
+    return [{"name": name} for name in names[:MAX_PLANNER_NODE_TYPE_INPUTS]]
+
+
+def _node_type_output_rows(context: dict, node_type: str) -> list[dict]:
+    row = _node_type_row(context, node_type)
+    if row is None:
+        return []
+    explicit_outputs = row.get("outputs")
+    if isinstance(explicit_outputs, list):
+        return [
+            item
+            for item in explicit_outputs[:MAX_PLANNER_NODE_TYPE_INPUTS]
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        ]
+    output_types = row.get("output")
+    if not isinstance(output_types, list):
+        return []
+    output_names = row.get("output_name")
+    rows = []
+    for index, output_type in enumerate(output_types[:MAX_PLANNER_NODE_TYPE_INPUTS]):
+        if not isinstance(output_type, str) or not output_type:
+            continue
+        name = output_type
+        if isinstance(output_names, list) and index < len(output_names):
+            candidate = output_names[index]
+            if isinstance(candidate, str) and candidate:
+                name = candidate
+        rows.append({"name": name, "type": output_type})
+    return rows
+
+
+def _node_type_input_looks_like_widget(row: dict) -> bool:
+    input_type = row.get("type")
+    if isinstance(input_type, str):
+        return input_type.upper() in {"STRING", "INT", "FLOAT", "BOOLEAN", "COMBO"}
+    return input_type is None
+
+
+def _node_type_widget_input_rows(context: dict, node_type: str) -> list[dict]:
+    row = _node_type_row(context, node_type) or {}
+    rows = []
+    seen = set()
+    for candidate in (*_node_type_input_rows(context, node_type), *_input_rows_from_schema_mapping(row)):
+        name = candidate.get("name")
+        if not isinstance(name, str) or name in seen:
+            continue
+        if not _node_type_input_looks_like_widget(candidate):
+            continue
+        seen.add(name)
+        rows.append(candidate)
+    return rows
+
+
+def _node_type_widget_name_hint_from_text(context: dict, node_type: str, text: str) -> tuple[str, dict] | None:
+    normalized_text = _normalize_node_type_phrase(text)
+    matches = []
+    for row in _node_type_widget_input_rows(context, node_type):
+        name = row["name"]
+        lowered = name.lower()
+        normalized_name = _normalize_node_type_phrase(name)
+        spaced_name = name.replace("_", " ").lower()
+        if lowered in text.lower() or spaced_name in text.lower() or normalized_name in normalized_text:
+            matches.append((len(normalized_name), name, row))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0], reverse=True)
+    return matches[0][1], matches[0][2]
+
+
+def _node_type_input_row_by_name(context: dict, node_type: str, name: str) -> dict | None:
+    lowered = name.lower()
+    for row in _node_type_widget_input_rows(context, node_type):
+        row_name = row.get("name")
+        if isinstance(row_name, str) and row_name.lower() == lowered:
+            return row
+    return None
+
+
+def _coerce_new_node_widget_value(value: str, input_row: dict | None) -> object:
+    input_type = input_row.get("type") if isinstance(input_row, dict) else None
+    input_type = input_type.upper() if isinstance(input_type, str) else None
+    lowered = value.lower()
+    if input_type == "BOOLEAN":
+        if lowered in {"true", "yes", "on", "1"} or value in {"开", "开启", "是"}:
+            return True
+        if lowered in {"false", "no", "off", "0"} or value in {"关", "关闭", "否"}:
+            return False
+    if input_type == "INT":
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if input_type == "FLOAT":
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _default_new_node_widget_value(input_row: dict) -> object:
+    input_type = input_row.get("type")
+    input_type = input_type.upper() if isinstance(input_type, str) else None
+    if input_type == "BOOLEAN":
+        return False
+    if input_type == "INT":
+        return 0
+    if input_type == "FLOAT":
+        return 0.0
+    return ""
+
+
+def _synthetic_widget_node_for_type(context: dict, node_type: str) -> dict:
+    return {
+        "type": node_type,
+        "title": node_type,
+        "widgets": [
+            {"name": row["name"], "value": _default_new_node_widget_value(row)}
+            for row in _node_type_widget_input_rows(context, node_type)
+        ],
+    }
+
+
+def _extract_quoted_node_type_phrase(text: str) -> str | None:
+    for opener, closer in (('"', '"'), ("'", "'"), ("`", "`"), ("“", "”"), ("「", "」"), ("『", "』")):
+        pattern = (
+            rf"(?:添加|新增|创建|加|add|create)(?:一个|一個|个|\s+a|\s+an)?\s*"
+            rf"{re.escape(opener)}(?P<node_type>.+?){re.escape(closer)}"
+        )
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return _strip_value(match.group("node_type"))
+    return None
+
+
+def _extract_unquoted_node_type_phrase(text: str) -> str | None:
     patterns = (
-        r"(?:添加|新增|创建|加)(?:一个|一個|个)?\s*([A-Za-z][A-Za-z0-9_./:-]+)\s*(?:节点|node)",
-        r"\b(?:add|create)\s+(?:a\s+|an\s+)?(?:node\s+)?([A-Za-z][A-Za-z0-9_./:-]+)\b",
+        r"(?:添加|新增|创建|加)(?:一个|一個|个)?\s*(?P<node_type>.+?)\s*(?:节点|node)(?:[\s,，。；;]|$)",
+        r"\b(?:add|create)\s+(?:a\s+|an\s+)?(?:node\s+)?(?P<node_type>.+?)(?:\s+node)?(?:[\s,，。；;]|$)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1).rstrip(".,，。")
+            return _strip_value(match.group("node_type"))
     return None
+
+
+def _looks_like_exact_node_type_phrase(phrase: str) -> bool:
+    return re.fullmatch(r"[A-Za-z][A-Za-z0-9_./:-]*(?:\s+[A-Za-z][A-Za-z0-9_./:-]*)*", phrase) is not None
+
+
+def _node_type_from_exact_phrase(phrase: str) -> str | None:
+    cleaned = _strip_value(phrase)
+    if not _looks_like_exact_node_type_phrase(cleaned):
+        return None
+    if " " in cleaned:
+        return "".join(cleaned.split())
+    return cleaned.rstrip(".,，。")
+
+
+def _extract_node_type_to_add(text: str, context: dict) -> str | None:
+    alias = _node_type_alias_to_add(text)
+    if alias is not None:
+        return alias[0]
+    quoted = _extract_quoted_node_type_phrase(text)
+    if quoted:
+        return _registered_node_type_for_phrase(context, quoted) or quoted
+    phrase = _extract_unquoted_node_type_phrase(text)
+    if not phrase:
+        return None
+    return _registered_node_type_for_phrase(context, phrase) or _node_type_from_exact_phrase(phrase)
 
 
 def _extract_new_node_size_widgets(text: str) -> dict[str, object]:
@@ -1736,34 +3209,329 @@ def _new_node_widget_name(node_type: str, widget_name: str) -> str:
     return widget_name
 
 
-def _initial_widgets_for_new_node(node_type: str, text: str) -> dict[str, object]:
+def _initial_widgets_for_new_node(node_type: str, text: str, context: dict) -> dict[str, object]:
     widgets = {}
     widgets.update(_extract_new_node_size_widgets(text))
     value = _extract_value_after_set(text)
     widget_name = _widget_name_hint_from_text(text)
+    schema_widget = None
+    if widget_name is None:
+        schema_widget = _node_type_widget_name_hint_from_text(context, node_type, text)
+        if schema_widget is not None:
+            widget_name = schema_widget[0]
     if value and widget_name:
         widget_name = _new_node_widget_name(node_type, widget_name)
+        if widget_name == "image" and node_type != "LoadImage":
+            return widgets
         if widget_name not in widgets:
-            widgets[widget_name] = value
+            if schema_widget is None:
+                input_row = _node_type_input_row_by_name(context, node_type, widget_name)
+            else:
+                input_row = schema_widget[1]
+            widgets[widget_name] = _coerce_new_node_widget_value(value, input_row)
+    synthetic_node = _synthetic_widget_node_for_type(context, node_type)
+    assignments = _merge_widget_assignments(
+        _use_widget_assignment(text, synthetic_node),
+        _widget_assignments(text, synthetic_node),
+    )
+    for widget, assignment_value in assignments:
+        widget_name = _new_node_widget_name(node_type, widget["name"])
+        if widget_name == "image" and node_type != "LoadImage":
+            continue
+        widgets.setdefault(widget_name, assignment_value)
     return widgets
 
 
-def _plan_graph_add_node(text: str) -> dict | None:
+def _plan_graph_add_node(text: str, context: dict) -> dict | None:
     if not any(term in text.lower() or term in text for term in ("添加", "新增", "创建", "add", "create")):
         return None
-    node_type = _extract_node_type_to_add(text)
+    node_type = _extract_node_type_to_add(text, context)
     if not node_type:
         return None
     payload = {"node_type": node_type}
     alias = _node_type_alias_to_add(text)
     if alias is not None and alias[1]:
         payload["title"] = alias[1]
-    widgets = _initial_widgets_for_new_node(node_type, text)
+    widgets = _initial_widgets_for_new_node(node_type, text, context)
     if widgets:
         payload["widgets"] = widgets
     return {
         "summary": f"Add graph node {node_type}",
         "actions": [{"type": "graph.add_node", "payload": payload}],
+    }
+
+
+def _existing_to_new_node_origin_phrase(text: str) -> str | None:
+    patterns = (
+        r"(?:并把|并将|然后把|然后将|接着把|接着将|再把|再将|，把|,)\s*(?P<origin>.+?)\s*(?:连接到|连到|接到)\s*(?:它|这个节点|新节点|该节点)\s*$",
+        r"\band\s+connect\s+(?P<origin>.+?)\s+(?:to|into)\s+(?:it|the\s+new\s+node)\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            origin = _strip_value(match.group("origin"))
+            if origin:
+                return origin
+    return None
+
+
+def _new_node_to_existing_target_phrase(text: str) -> str | None:
+    patterns = (
+        r"(?:并把|并将|然后把|然后将|接着把|接着将|再把|再将|，把|,)\s*(?:它|这个节点|新节点|该节点)\s*(?:连接到|连到|接到)\s*(?P<target>.+?)\s*$",
+        r"\band\s+connect\s+(?:it|the\s+new\s+node)\s+(?:to|into)\s+(?P<target>.+?)\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            target = _strip_value(match.group("target"))
+            if target:
+                return target
+    return None
+
+
+def _strip_new_node_connect_clause(text: str) -> str:
+    patterns = (
+        r"\s*(?:，|,)?\s*(?:并把|并将|然后把|然后将|接着把|接着将|再把|再将)\s*(?:它|这个节点|新节点|该节点)\s*(?:连接到|连到|接到)\s*.+$",
+        r"\s*(?:，|,)?\s*(?:并把|并将|然后把|然后将|接着把|接着将|再把|再将)\s*.+?\s*(?:连接到|连到|接到)\s*(?:它|这个节点|新节点|该节点)\s*$",
+        r"\s+and\s+connect\s+(?:it|the\s+new\s+node)\s+(?:to|into)\s+.+$",
+        r"\s+and\s+connect\s+.+?\s+(?:to|into)\s+(?:it|the\s+new\s+node)\s*$",
+    )
+    stripped = text
+    for pattern in patterns:
+        stripped = re.sub(pattern, "", stripped, flags=re.IGNORECASE)
+    return _strip_value(stripped)
+
+
+def _synthetic_node_for_type(context: dict, node_type: str) -> dict:
+    row = _node_type_row(context, node_type) or {}
+    title = row.get("title") if isinstance(row.get("title"), str) else node_type
+    return {
+        "type": node_type,
+        "title": title,
+        "inputs": _node_type_input_rows(context, node_type),
+        "outputs": _node_type_output_rows(context, node_type),
+    }
+
+
+def _plan_graph_add_node_and_connect(text: str, context: dict) -> dict | None:
+    origin_phrase = _existing_to_new_node_origin_phrase(text)
+    target_phrase = _new_node_to_existing_target_phrase(text)
+    if origin_phrase is None and target_phrase is None:
+        return None
+    add_text = _strip_new_node_connect_clause(text)
+    add_plan = _plan_graph_add_node(add_text, context)
+    if add_plan is None or len(add_plan.get("actions", [])) != 1:
+        return None
+    add_action = add_plan["actions"][0]
+    add_payload = dict(add_action.get("payload", {}))
+    node_type = add_payload.get("node_type")
+    if not isinstance(node_type, str) or not node_type:
+        return None
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    node_ref = "new_node"
+    add_payload["ref"] = node_ref
+    if target_phrase is not None:
+        target = _find_node_for_phrase(nodes, target_phrase, links)
+        if target is None:
+            return None
+        origin = _synthetic_node_for_type(context, node_type)
+        slots = _infer_connect_slots(origin, target, node_type, target_phrase)
+        if slots is None:
+            return None
+        return {
+            "summary": f"Add graph node {node_type} and connect to node {target.get('id')}",
+            "actions": [
+                {"type": "graph.add_node", "payload": add_payload},
+                {
+                    "type": "graph.connect",
+                    "payload": {
+                        "origin_node_ref": node_ref,
+                        "origin_slot": slots[0],
+                        "target_node_id": target.get("id"),
+                        "target_slot": slots[1],
+                    },
+                },
+            ],
+        }
+    origin = _find_node_for_phrase(nodes, origin_phrase or "", links)
+    if origin is None:
+        return None
+    target = _synthetic_node_for_type(context, node_type)
+    slots = _infer_connect_slots(origin, target, origin_phrase or "", node_type)
+    if slots is None:
+        return None
+    return {
+        "summary": f"Add graph node {node_type} and connect node {origin.get('id')}",
+        "actions": [
+            {"type": "graph.add_node", "payload": add_payload},
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": slots[0],
+                    "target_node_ref": node_ref,
+                    "target_slot": slots[1],
+                },
+            },
+        ],
+    }
+
+
+def _adjacent_new_node_parts(text: str) -> tuple[str, str, str] | None:
+    patterns = (
+        r"(?:在|给)?\s*(?P<anchor>.+?)\s*(?P<position>后面|后边|之后|前面|前边|之前)\s*(?:添加|新增|创建|加|插入)\s*(?:一个|一個|个)?\s*(?P<node>.+?)\s*(?:节点)?$",
+        r"\b(?:add|create|insert)\s+(?:a\s+|an\s+)?(?P<node>.+?)\s+(?:node\s+)?(?P<position>after|behind|before)\s+(?P<anchor>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        anchor = _strip_value(match.group("anchor"))
+        node = _strip_value(match.group("node"))
+        position = match.group("position").lower()
+        if not anchor or not node:
+            continue
+        if position in {"后面", "后边", "之后", "after", "behind"}:
+            return anchor, "after", node
+        return anchor, "before", node
+    return None
+
+
+def _plan_graph_add_adjacent_node(text: str, context: dict) -> dict | None:
+    parts = _adjacent_new_node_parts(text)
+    if parts is None:
+        return None
+    anchor_phrase, position, node_phrase = parts
+    add_plan = _plan_graph_add_node(f"添加 {node_phrase} 节点", context)
+    if add_plan is None or len(add_plan.get("actions", [])) != 1:
+        return None
+    add_payload = dict(add_plan["actions"][0].get("payload", {}))
+    node_type = add_payload.get("node_type")
+    if not isinstance(node_type, str) or not node_type:
+        return None
+
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    anchor = _find_node_for_phrase(nodes, anchor_phrase, links)
+    if anchor is None:
+        return None
+    new_node = _synthetic_node_for_type(context, node_type)
+    node_ref = "new_node"
+    add_payload["ref"] = node_ref
+
+    if position == "after":
+        slots = _infer_connect_slots(anchor, new_node, anchor_phrase, node_type)
+        if slots is None:
+            return None
+        connect_payload = {
+            "origin_node_id": anchor.get("id"),
+            "origin_slot": slots[0],
+            "target_node_ref": node_ref,
+            "target_slot": slots[1],
+        }
+    else:
+        slots = _infer_connect_slots(new_node, anchor, node_type, anchor_phrase)
+        if slots is None:
+            return None
+        connect_payload = {
+            "origin_node_ref": node_ref,
+            "origin_slot": slots[0],
+            "target_node_id": anchor.get("id"),
+            "target_slot": slots[1],
+        }
+
+    return {
+        "summary": f"Add graph node {node_type} {position} node {anchor.get('id')}",
+        "actions": [
+            {"type": "graph.add_node", "payload": add_payload},
+            {"type": "graph.connect", "payload": connect_payload},
+        ],
+    }
+
+
+def _insert_node_between_parts(text: str) -> tuple[str, str, str] | None:
+    patterns = (
+        r"(?:在|把|将)?\s*(?P<origin>.+?)\s*(?:和|与|到|->)\s*(?P<target>.+?)\s*之间\s*(?:插入|加入|添加|新增)\s*(?:一个|一個|个)?\s*(?P<node>.+?)\s*(?:节点)?$",
+        r"(?:把|将)?\s*(?P<node>.+?)\s*(?:插到|插入到|加入到|加到|放到)\s*(?P<origin>.+?)\s*(?:和|与|到|->)\s*(?P<target>.+?)\s*之间\s*$",
+        r"\binsert\s+(?:a\s+|an\s+)?(?P<node>.+?)\s+between\s+(?P<origin>.+?)\s+and\s+(?P<target>.+?)$",
+        r"\badd\s+(?:a\s+|an\s+)?(?P<node>.+?)\s+between\s+(?P<origin>.+?)\s+and\s+(?P<target>.+?)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        origin = _strip_value(match.group("origin"))
+        target = _strip_value(match.group("target"))
+        node = _strip_value(match.group("node"))
+        if origin and target and node:
+            return origin, target, node
+    return None
+
+
+def _plan_graph_insert_node_between(text: str, context: dict) -> dict | None:
+    parts = _insert_node_between_parts(text)
+    if parts is None:
+        return None
+    origin_phrase, target_phrase, node_phrase = parts
+    add_plan = _plan_graph_add_node(f"添加 {node_phrase} 节点", context)
+    if add_plan is None or len(add_plan.get("actions", [])) != 1:
+        return None
+    add_payload = dict(add_plan["actions"][0].get("payload", {}))
+    node_type = add_payload.get("node_type")
+    if not isinstance(node_type, str) or not node_type:
+        return None
+    widgets = dict(add_payload.get("widgets", {})) if isinstance(add_payload.get("widgets"), dict) else {}
+    widgets.update(
+        {
+            key: value
+            for key, value in _initial_widgets_for_new_node(node_type, text, context).items()
+            if key not in widgets
+        }
+    )
+    if widgets:
+        add_payload["widgets"] = widgets
+
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    origin = _find_node_for_phrase(nodes, origin_phrase, links)
+    target = _find_node_for_phrase(nodes, target_phrase, links)
+    if origin is None or target is None:
+        return None
+    inserted = _synthetic_node_for_type(context, node_type)
+    incoming_slots = _infer_connect_slots(origin, inserted, origin_phrase, node_type)
+    outgoing_slots = _infer_connect_slots(inserted, target, node_type, target_phrase)
+    if incoming_slots is None or outgoing_slots is None:
+        return None
+
+    node_ref = "new_node"
+    add_payload["ref"] = node_ref
+    return {
+        "summary": (
+            f"Insert graph node {node_type} between node {origin.get('id')} "
+            f"and node {target.get('id')}"
+        ),
+        "actions": [
+            {"type": "graph.add_node", "payload": add_payload},
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": incoming_slots[0],
+                    "target_node_ref": node_ref,
+                    "target_slot": incoming_slots[1],
+                },
+            },
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_ref": node_ref,
+                    "origin_slot": outgoing_slots[0],
+                    "target_node_id": target.get("id"),
+                    "target_slot": outgoing_slots[1],
+                },
+            },
+        ],
     }
 
 
@@ -1817,6 +3585,47 @@ def _find_node_for_phrase(
         return None
     matches.sort(key=lambda item: item[0], reverse=True)
     return matches[0][1]
+
+
+def _replacement_parts(text: str) -> tuple[str, str] | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("节点", "node")):
+        return None
+    patterns = (
+        r"(?:把|将)?\s*(?P<old>.+?)\s*(?P<operator>替换成|替换为|换成|换为)\s*(?P<new>.+?)$",
+        r"\breplace\s+(?P<old>.+?)\s+(?P<operator>with)\s+(?P<new>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        old_phrase = _strip_value(match.group("old"))
+        new_phrase = _strip_value(match.group("new"))
+        old_lowered = old_phrase.lower()
+        old_is_node = (
+            old_phrase.endswith("节点")
+            or old_lowered.endswith("node")
+            or _message_mentions_current_node(old_phrase)
+        )
+        if old_phrase and new_phrase and old_is_node:
+            return old_phrase, new_phrase
+    return None
+
+
+def _node_type_for_replacement(context: dict, phrase: str) -> str | None:
+    cleaned = _strip_value(phrase).removesuffix("节点").removesuffix("node").strip()
+    registered = _registered_node_type_for_phrase(context, cleaned)
+    if registered:
+        return registered
+    alias = _node_type_alias_to_add(cleaned)
+    if alias is not None:
+        return alias[0]
+    if "/" in cleaned or "\\" in cleaned or re.search(r"\.[A-Za-z0-9]{2,6}$", cleaned):
+        return None
+    return (
+        _node_type_from_exact_phrase(cleaned)
+        or _extract_node_type_to_add(f"添加 {cleaned} 节点", context)
+    )
 
 
 def _slot_index_for_hint(node: dict, slot_key: str, hint: str | None) -> int | None:
@@ -1892,6 +3701,111 @@ def _infer_connect_slots(
     return (0, 0)
 
 
+def _slot_index_for_replacement(
+    replacement: dict,
+    replacement_slot_key: str,
+    old_node: dict,
+    old_slot_key: str,
+    old_index: object,
+) -> int | None:
+    try:
+        index = int(old_index)
+    except (TypeError, ValueError):
+        return None
+    old_slots = _slot_rows(old_node, old_slot_key)
+    if index < 0 or index >= len(old_slots):
+        return None
+    old_slot = old_slots[index]
+    old_name = old_slot.get("name")
+    if isinstance(old_name, str) and old_name:
+        matched_by_name = _slot_index_for_hint(replacement, replacement_slot_key, old_name)
+        if matched_by_name is not None:
+            return matched_by_name
+    matched_by_type = _slot_index_for_type(replacement, replacement_slot_key, _slot_type(old_slot))
+    if matched_by_type is not None:
+        return matched_by_type
+    replacement_slots = _slot_rows(replacement, replacement_slot_key)
+    if index < len(replacement_slots):
+        return index
+    return None
+
+
+def _plan_graph_replace_node(text: str, context: dict) -> dict | None:
+    parts = _replacement_parts(text)
+    if parts is None:
+        return None
+    old_phrase, new_phrase = parts
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    old_node = _find_node_for_phrase(nodes, old_phrase, links)
+    if old_node is None:
+        return None
+    node_type = _node_type_for_replacement(context, new_phrase)
+    if not node_type:
+        return None
+
+    replacement = _synthetic_node_for_type(context, node_type)
+    node_ref = "replacement_node"
+    add_payload = {"node_type": node_type, "ref": node_ref}
+    pos = old_node.get("pos")
+    if isinstance(pos, list) and len(pos) >= 2:
+        add_payload["pos"] = [pos[0], pos[1]]
+
+    old_node_id = old_node.get("id")
+    actions = [{"type": "graph.add_node", "payload": add_payload}]
+    for link in links:
+        if str(link.get("target_id")) != str(old_node_id):
+            continue
+        target_slot = _slot_index_for_replacement(
+            replacement,
+            "inputs",
+            old_node,
+            "inputs",
+            link.get("target_slot"),
+        )
+        if target_slot is None:
+            continue
+        actions.append(
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": link.get("origin_id"),
+                    "origin_slot": link.get("origin_slot", 0),
+                    "target_node_ref": node_ref,
+                    "target_slot": target_slot,
+                },
+            }
+        )
+    for link in links:
+        if str(link.get("origin_id")) != str(old_node_id):
+            continue
+        origin_slot = _slot_index_for_replacement(
+            replacement,
+            "outputs",
+            old_node,
+            "outputs",
+            link.get("origin_slot"),
+        )
+        if origin_slot is None:
+            continue
+        actions.append(
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_ref": node_ref,
+                    "origin_slot": origin_slot,
+                    "target_node_id": link.get("target_id"),
+                    "target_slot": link.get("target_slot", 0),
+                },
+            }
+        )
+    actions.append({"type": "graph.delete_node", "payload": {"node_id": old_node_id}})
+    return {
+        "summary": f"Replace graph node {old_node_id} with {node_type}",
+        "actions": actions,
+    }
+
+
 def _connect_plan(origin: dict, origin_slot: int, target: dict, target_slot: int) -> dict:
     return {
         "summary": f"Connect node {origin.get('id')} to node {target.get('id')}",
@@ -1905,6 +3819,161 @@ def _connect_plan(origin: dict, origin_slot: int, target: dict, target_slot: int
                     "target_slot": target_slot,
                 },
             }
+        ],
+    }
+
+
+def _reroute_connection_parts(text: str) -> tuple[str, str] | None:
+    patterns = (
+        r"(?:把|将)?\s*(?P<origin>.+?)\s*(?:重新接到|重新连接到|重接到|重连到|改接到|改连到)\s*(?P<target>.+)$",
+        r"\b(?:reroute|reconnect)\s+(?P<origin>.+?)\s+(?:to|into)\s+(?P<target>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        origin = _strip_value(match.group("origin"))
+        target = _strip_value(match.group("target"))
+        if origin and target:
+            return origin, target
+    return None
+
+
+def _split_node_phrase_and_slot_hint(phrase: str) -> tuple[str, str | None]:
+    patterns = (
+        r"(?P<node>.+?)\s*的\s*(?P<slot>[A-Za-z0-9_ -]+)(?:\s*(?:输入|输出|input|output))?$",
+        r"(?P<node>.+?)\s+(?:slot|input|output)\s+(?P<slot>[A-Za-z0-9_ -]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, phrase, re.IGNORECASE)
+        if not match:
+            continue
+        node_phrase = _strip_value(match.group("node"))
+        slot_hint = _strip_value(match.group("slot"))
+        if node_phrase and slot_hint:
+            return node_phrase, slot_hint
+    return phrase, None
+
+
+def _find_reroute_target_node(
+    nodes: list[dict],
+    phrase: str,
+    links: list[dict] | None = None,
+) -> dict | None:
+    explicit = _find_node_by_id(nodes, _extract_node_id(phrase))
+    if explicit is not None:
+        return explicit
+    labelled = _find_node_by_label(nodes, phrase)
+    if labelled is not None:
+        return labelled
+    return _find_node_for_phrase(nodes, phrase, links)
+
+
+def _input_reroute_parts(text: str) -> tuple[str, str, str] | None:
+    patterns = (
+        r"(?:把|将)?\s*(?P<target>.+?)\s*的\s*(?P<slot>[A-Za-z0-9_ -]+)\s*(?:输入|input)\s*(?:重新接到|重新连接到|重接到|重连到|改接到|改连到)\s*(?P<origin>.+)$",
+        r"\b(?:reroute|reconnect)\s+(?P<target>.+?)\s+(?P<slot>[A-Za-z0-9_ -]+)\s+input\s+(?:to|from)\s+(?P<origin>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        target = _strip_value(match.group("target"))
+        slot = _strip_value(match.group("slot"))
+        origin = _strip_value(match.group("origin"))
+        if target and slot and origin:
+            return target, slot, origin
+    return None
+
+
+def _plan_graph_reroute_input(text: str, context: dict) -> dict | None:
+    parts = _input_reroute_parts(text)
+    if parts is None:
+        return None
+    target_phrase, target_slot_hint, origin_phrase = parts
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    target = _find_reroute_target_node(nodes, target_phrase, links)
+    origin = _find_reroute_target_node(nodes, origin_phrase, links)
+    if target is None or origin is None or target.get("id") == origin.get("id"):
+        return None
+    target_slot = _slot_index_for_hint(target, "inputs", target_slot_hint)
+    if target_slot is None:
+        return None
+    target_inputs = _slot_rows(target, "inputs")
+    target_type = _slot_type(target_inputs[target_slot]) if target_slot < len(target_inputs) else None
+    origin_slot = _slot_index_for_type(origin, "outputs", target_type)
+    if origin_slot is None:
+        inferred = _infer_connect_slots(origin, target, origin_phrase, target_phrase)
+        if inferred is None:
+            return None
+        origin_slot = inferred[0]
+    return {
+        "summary": f"Reroute input {target_slot} on node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {"target_node_id": target.get("id"), "target_slot": target_slot},
+            },
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": origin_slot,
+                    "target_node_id": target.get("id"),
+                    "target_slot": target_slot,
+                },
+            },
+        ],
+    }
+
+
+def _plan_graph_reroute_connection(text: str, context: dict) -> dict | None:
+    parts = _reroute_connection_parts(text)
+    if parts is None:
+        return None
+    origin_phrase_raw, target_phrase_raw = parts
+    origin_phrase, origin_slot_hint = _split_node_phrase_and_slot_hint(origin_phrase_raw)
+    target_phrase, target_slot_hint = _split_node_phrase_and_slot_hint(target_phrase_raw)
+
+    nodes = _graph_nodes(context)
+    links = _graph_links(context)
+    origin = _find_node_for_phrase(nodes, origin_phrase, links)
+    target = _find_reroute_target_node(nodes, target_phrase, links)
+    if origin is None or target is None or origin.get("id") == target.get("id"):
+        return None
+
+    slots = _infer_connect_slots(origin, target, origin_phrase_raw, target_phrase_raw)
+    if slots is None:
+        return None
+    origin_slot, target_slot = slots
+    if origin_slot_hint is not None:
+        explicit_origin_slot = _slot_index_for_hint(origin, "outputs", origin_slot_hint)
+        if explicit_origin_slot is None:
+            return None
+        origin_slot = explicit_origin_slot
+    if target_slot_hint is not None:
+        explicit_target_slot = _slot_index_for_hint(target, "inputs", target_slot_hint)
+        if explicit_target_slot is None:
+            return None
+        target_slot = explicit_target_slot
+
+    return {
+        "summary": f"Reroute node {origin.get('id')} to node {target.get('id')}",
+        "actions": [
+            {
+                "type": "graph.disconnect",
+                "payload": {"origin_node_id": origin.get("id"), "origin_slot": origin_slot},
+            },
+            {
+                "type": "graph.connect",
+                "payload": {
+                    "origin_node_id": origin.get("id"),
+                    "origin_slot": origin_slot,
+                    "target_node_id": target.get("id"),
+                    "target_slot": target_slot,
+                },
+            },
         ],
     }
 
@@ -2098,11 +4167,7 @@ def _disconnect_all_plan(
         node = _find_node_for_phrase(nodes, node_phrase, links)
     if node is None:
         return None
-    payload_key = {
-        "inputs": "target_node_id",
-        "outputs": "origin_node_id",
-        "all": "node_id",
-    }[scope]
+    payload_key = _disconnect_payload_key_for_scope(scope)
     return {
         "summary": f"Disconnect {scope} on node {node.get('id')}",
         "actions": [
@@ -2178,6 +4243,153 @@ def _extract_url(text: str) -> str | None:
     return None
 
 
+MODEL_SAVE_PATH_TYPES = {
+    "checkpoints": "checkpoints",
+    "checkpoint": "checkpoints",
+    "loras": "lora",
+    "lora": "lora",
+    "vae": "vae",
+    "text_encoders": "clip",
+    "text_encoder": "clip",
+    "clip": "clip",
+    "controlnet": "controlnet",
+    "controlnets": "controlnet",
+    "upscale_models": "upscale",
+    "upscalers": "upscale",
+    "embeddings": "embedding",
+    "diffusion_models": "diffusion_model",
+    "unet": "diffusion_model",
+}
+
+
+def _url_basename(url: str) -> str | None:
+    basename = os.path.basename(unquote(urlparse(url).path).rstrip("/"))
+    return basename or None
+
+
+def _extract_model_save_path(text: str, url: str) -> str | None:
+    tail = text[text.find(url) + len(url):] if url in text else text
+    match = re.search(
+        r"(?:保存到|存到|下载到|放到|放进|到|save_path|save path|into|to)\s*([A-Za-z0-9_./-]+)",
+        tail,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).rstrip(".,，。")
+    return None
+
+
+def _extract_model_filename(text: str, url: str) -> str | None:
+    match = re.search(
+        r"(?:文件名|保存为|存为|(?<![A-Za-z0-9_])(?:filename|file name|save as|as)(?![A-Za-z0-9_]))\s*[:：=]?\s*([A-Za-z0-9_.-]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).rstrip(".,，。")
+    return _url_basename(url)
+
+
+def _extract_model_base(text: str) -> str | None:
+    match = re.search(r"(?:base|基础模型)\s*[:：=]?\s*([A-Za-z0-9_.-]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).rstrip(".,，。")
+    return None
+
+
+def _plan_model_install(text: str) -> dict | None:
+    lowered = text.lower()
+    if not any(term in lowered or term in text for term in ("安装", "下载", "install", "download")):
+        return None
+    if not any(term in lowered or term in text for term in ("模型", "model")):
+        return None
+    url = _extract_url(text)
+    if not url:
+        return None
+    save_path = _extract_model_save_path(text, url)
+    filename = _extract_model_filename(text, url)
+    base = _extract_model_base(text)
+    if not save_path or not filename or not base:
+        return None
+    model_type = MODEL_SAVE_PATH_TYPES.get(save_path.lower(), save_path)
+    model = {
+        "name": filename,
+        "type": model_type,
+        "base": base,
+        "save_path": save_path,
+        "url": url,
+        "filename": filename,
+        "ui_id": filename,
+    }
+    return {
+        "summary": f"Install model {filename} through ComfyUI-Manager",
+        "actions": [{"type": "model.install", "payload": {"model": model}}],
+    }
+
+
+def _plan_manager_queue_status(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_queue_or_progress = any(
+        term in lowered or term in text for term in ("queue", "progress", "队列", "进度")
+    )
+    mentions_status = any(term in lowered or term in text for term in ("status", "状态"))
+    mentions_manager = any(
+        term in lowered or term in text
+        for term in ("manager", "comfyui-manager", "节点管理器", "管理器")
+    )
+    mentions_install_download = any(
+        term in lowered or term in text for term in ("install", "download", "安装", "下载")
+    )
+    mentions_package_domain = any(
+        term in lowered or term in text
+        for term in ("model", "custom node", "custom nodes", "模型", "自定义节点", "插件", "扩展")
+    )
+    mentions_read = any(
+        term in lowered or term in text
+        for term in ("查看", "看看", "检查", "查询", "read", "check", "status", "状态", "progress", "进度")
+    )
+    if not (mentions_queue_or_progress or mentions_status):
+        return None
+    if not mentions_read:
+        return None
+    if not (mentions_manager or mentions_install_download or mentions_package_domain):
+        return None
+    if mentions_status and not (mentions_queue_or_progress or mentions_manager or mentions_install_download):
+        return None
+    return {
+        "summary": "Check ComfyUI-Manager queue status",
+        "actions": [{"type": "manager.queue_status", "payload": {}}],
+    }
+
+
+def _plan_manager_queue_control(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_manager = any(
+        term in lowered or term in text
+        for term in ("manager", "comfyui-manager", "节点管理器", "管理器")
+    )
+    mentions_queue = any(term in lowered or term in text for term in ("queue", "队列"))
+    if not (mentions_manager and mentions_queue):
+        return None
+    if any(
+        term in lowered or term in text
+        for term in ("开始", "启动", "执行", "start", "run", "process")
+    ):
+        return {
+            "summary": "Start ComfyUI-Manager queue",
+            "actions": [{"type": "manager.queue_start", "payload": {}}],
+        }
+    if any(
+        term in lowered or term in text
+        for term in ("清空", "清除", "清掉", "重置", "取消", "reset", "clear")
+    ):
+        return {
+            "summary": "Reset ComfyUI-Manager queue",
+            "actions": [{"type": "manager.queue_reset", "payload": {}}],
+        }
+    return None
+
+
 CUSTOM_NODE_MARKERS = (
     "custom node",
     "custom nodes",
@@ -2224,11 +4436,125 @@ def _mentions_custom_node(text: str) -> bool:
     return any(marker in lowered or marker in text for marker in CUSTOM_NODE_MARKERS)
 
 
+def _extract_custom_node_search_query(text: str) -> str | None:
+    patterns = (
+        r"(?:搜索|查找|找一下|search|find)\s*(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)?\s+(?P<query>.+)$",
+        r"(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)\s*(?:搜索|查找|search|find)\s+(?P<query>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        query = _strip_value(match.group("query"))
+        query = re.sub(r"\s*(?:custom\s+nodes?|自定义节点|节点管理器|manager(?:\s+node)?|插件|扩展|节点)\s*$", "", query, flags=re.IGNORECASE)
+        query = _strip_value(query)
+        if query:
+            return query
+    return None
+
+
+def _plan_custom_node_read_action(text: str) -> dict | None:
+    if not _mentions_custom_node(text):
+        return None
+    lowered = text.lower()
+    mentions_search = any(term in lowered or term in text for term in ("搜索", "查找", "找一下", "search", "find"))
+    if mentions_search:
+        query = _extract_custom_node_search_query(text)
+        if query:
+            return {
+                "summary": f"Search custom nodes for {query}",
+                "actions": [{"type": "custom_node.search", "payload": {"query": query}}],
+            }
+
+    mentions_read = any(
+        term in lowered or term in text
+        for term in ("查看", "看看", "列出", "列表", "清单", "show", "list")
+    )
+    mentions_installed = any(term in lowered or term in text for term in ("已安装", "installed"))
+    if mentions_read and mentions_installed:
+        return {
+            "summary": "List installed custom nodes",
+            "actions": [{"type": "custom_node.list", "payload": {"scope": "installed"}}],
+        }
+    return None
+
+
+def _mentions_missing_workflow_node_install(text: str) -> bool:
+    lowered = text.lower()
+    mentions_missing = any(
+        term in lowered or term in text
+        for term in ("missing", "not installed", "缺失", "未安装", "报红", "红色")
+    )
+    mentions_node = any(term in lowered or term in text for term in ("node", "节点"))
+    mentions_fix = any(
+        term in lowered or term in text
+        for term in ("install", "fix", "repair", "resolve", "安装", "装上", "修复", "解决")
+    )
+    mentions_workflow = any(
+        term in lowered or term in text
+        for term in ("workflow", "graph", "当前工作流", "这个工作流", "当前图", "画布")
+    )
+    return mentions_missing and mentions_node and mentions_fix and mentions_workflow
+
+
+def _manager_id_for_missing_node(node: dict) -> str | None:
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        for key in ("cnr_id", "aux_id"):
+            value = properties.get(key)
+            if isinstance(value, str):
+                cleaned = _strip_value(value)
+                if cleaned and cleaned != "comfy-core":
+                    return cleaned
+    node_type = node.get("type")
+    if isinstance(node_type, str):
+        cleaned = _strip_value(node_type)
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _missing_workflow_custom_node_ids(context: dict) -> list[str]:
+    registered = _graph_registered_node_type_names(context)
+    if not registered:
+        return []
+    node_ids = []
+    seen = set()
+    for node in _graph_nodes(context):
+        node_type = node.get("type")
+        if not isinstance(node_type, str) or not node_type or node_type in registered:
+            continue
+        node_id = _manager_id_for_missing_node(node)
+        if not node_id or node_id in seen:
+            continue
+        seen.add(node_id)
+        node_ids.append(node_id)
+    return node_ids
+
+
+def _plan_missing_workflow_custom_nodes(text: str, context: dict) -> dict | None:
+    if not _mentions_missing_workflow_node_install(text):
+        return None
+    node_ids = _missing_workflow_custom_node_ids(context)
+    if not node_ids:
+        return None
+    return {
+        "summary": "Install missing custom nodes from current workflow through ComfyUI-Manager",
+        "actions": [
+            {
+                "type": "custom_node.install",
+                "payload": {"method": "manager_queue", "node": _manager_queue_node_payload(node_id)},
+            }
+            for node_id in node_ids
+        ],
+    }
+
+
 def _plan_custom_node_manager_action(text: str) -> dict | None:
     if not _mentions_custom_node(text):
         return None
     lowered = text.lower()
-    if any(term in lowered or term in text for term in ("全部", "所有", "all")) and any(
+    if any(term in lowered or term in text for term in ("全部", "所有", "已安装", "all", "installed")) and any(
         term in lowered or term in text for term in ("update", "更新", "升级")
     ):
         return {
@@ -2410,9 +4736,9 @@ def _plan_custom_node_state_action(text: str) -> dict | None:
     if not (_mentions_custom_node(text) or "节点" in text):
         return None
     action_type = None
-    if any(term in lowered or term in text for term in ("disable", "禁用")):
+    if any(term in lowered or term in text for term in ("disable", "禁用", "停用", "关闭", "关掉")):
         action_type = "custom_node.disable"
-    elif any(term in lowered or term in text for term in ("enable", "启用")):
+    elif any(term in lowered or term in text for term in ("enable", "启用", "开启", "打开", "恢复")):
         action_type = "custom_node.enable"
     if action_type is None:
         return None
@@ -2426,7 +4752,13 @@ def _plan_custom_node_state_action(text: str) -> dict | None:
     }
 
 
-def _plan_custom_node_action(text: str) -> dict | None:
+def _plan_custom_node_action(text: str, context: dict) -> dict | None:
+    missing_plan = _plan_missing_workflow_custom_nodes(text, context)
+    if missing_plan is not None:
+        return _with_restart_followup(missing_plan, text)
+    read_plan = _plan_custom_node_read_action(text)
+    if read_plan is not None:
+        return read_plan
     for planner in (
         _plan_custom_node_manager_action,
         _plan_custom_node_install_from_url,
@@ -2481,11 +4813,52 @@ def _extract_command_flag(text: str) -> str | None:
             "--use-pytorch-cross-attention",
         ),
         (("auto launch", "auto-launch", "自动打开浏览器"), "--disable-auto-launch"),
+        (("reserve-vram", "reserve vram", "预留显存", "保留显存"), "--reserve-vram"),
     )
     for triggers, flag in aliases:
         if any(trigger in lowered or trigger in text for trigger in triggers):
             return flag
     return None
+
+
+def _trim_command_value_tail(value: str) -> str:
+    patterns = (
+        r"\s*(?:并|然后|再)(?:应用|套用|重建|重启|restart|apply).*$",
+        r"\s+and\s+(?:apply|restart|rebuild).*$",
+    )
+    cleaned = value
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    return _strip_value(cleaned)
+
+
+def _extract_command_value(text: str) -> str | None:
+    value = _extract_value_after_set(text)
+    if value:
+        value = _trim_command_value_tail(value)
+        return value or None
+    return None
+
+
+def _plan_compose_command_value(text: str) -> dict | None:
+    flag = _extract_command_flag(text)
+    if not flag:
+        return None
+    lowered = text.lower()
+    if not any(
+        term in lowered or term in text
+        for term in ("compose", "comfyui", "command", "flag", "启动参数", "参数")
+    ):
+        return None
+    value = _extract_command_value(text)
+    if not value:
+        return None
+    return {
+        "summary": f"Set compose command value {flag} to {value}",
+        "actions": [
+            {"type": "compose.set_command_value", "payload": {"flag": flag, "value": value}}
+        ],
+    }
 
 
 def _plan_compose_command_flag(text: str) -> dict | None:
@@ -2723,6 +5096,27 @@ def _plan_service_healthcheck(text: str) -> dict | None:
     return None
 
 
+def _plan_service_logs(text: str) -> dict | None:
+    lowered = text.lower()
+    mentions_logs = any(term in lowered or term in text for term in ("log", "logs", "日志"))
+    if not mentions_logs:
+        return None
+    mentions_service = any(
+        term in lowered or term in text for term in ("comfyui", "容器", "container", "服务")
+    )
+    mentions_recent = any(
+        term in lowered or term in text for term in ("recent", "latest", "tail", "最近", "最后")
+    )
+    if not (mentions_service or mentions_recent):
+        return None
+    return {
+        "summary": "Read recent ComfyUI container logs",
+        "actions": [
+            {"type": "service.logs", "payload": {"container": "comfyui-gb10", "tail": 80}}
+        ],
+    }
+
+
 class RuleBasedPlanner:
     def plan(self, message: str, context: dict) -> dict:
         text = message.strip() if isinstance(message, str) else ""
@@ -2740,6 +5134,14 @@ class RuleBasedPlanner:
         restore_original_plan = _plan_restore_original_container(text)
         if restore_original_plan is not None:
             return restore_original_plan
+        graph_replace_plan = _plan_graph_replace_node(graph_text, context)
+        if graph_replace_plan is not None:
+            return _combine_with_followup_plans(graph_replace_plan, followup_plans, graph_text, text)
+        graph_neighborhood_plan = _plan_graph_neighborhood_action(graph_text, context)
+        if graph_neighborhood_plan is not None:
+            return _combine_with_followup_plans(
+                graph_neighborhood_plan, followup_plans, graph_text, text
+            )
         graph_delete_plan = _plan_graph_delete_node(graph_text, context)
         if graph_delete_plan is not None:
             return _combine_with_followup_plans(graph_delete_plan, followup_plans, graph_text, text)
@@ -2759,6 +5161,14 @@ class RuleBasedPlanner:
         graph_mode_plan = _plan_graph_set_mode(graph_text, context)
         if graph_mode_plan is not None:
             return _combine_with_followup_plans(graph_mode_plan, followup_plans, graph_text, text)
+        graph_collapsed_plan = _plan_graph_set_collapsed(graph_text, context)
+        if graph_collapsed_plan is not None:
+            return _combine_with_followup_plans(
+                graph_collapsed_plan, followup_plans, graph_text, text
+            )
+        graph_size_plan = _plan_graph_set_size(graph_text, context)
+        if graph_size_plan is not None:
+            return _combine_with_followup_plans(graph_size_plan, followup_plans, graph_text, text)
         graph_title_plan = _plan_graph_set_title(graph_text, context)
         if graph_title_plan is not None:
             return _combine_with_followup_plans(graph_title_plan, followup_plans, graph_text, text)
@@ -2769,6 +5179,11 @@ class RuleBasedPlanner:
         if graph_distribute_plan is not None:
             return _combine_with_followup_plans(
                 graph_distribute_plan, followup_plans, graph_text, text
+            )
+        graph_auto_layout_plan = _plan_graph_auto_layout(graph_text, context)
+        if graph_auto_layout_plan is not None:
+            return _combine_with_followup_plans(
+                graph_auto_layout_plan, followup_plans, graph_text, text
             )
         graph_position_plan = _plan_graph_set_position(graph_text, context)
         if graph_position_plan is not None:
@@ -2783,10 +5198,33 @@ class RuleBasedPlanner:
             return _combine_with_followup_plans(
                 graph_disconnect_plan, followup_plans, graph_text, text
             )
+        graph_insert_plan = _plan_graph_insert_node_between(graph_text, context)
+        if graph_insert_plan is not None:
+            return _combine_with_followup_plans(graph_insert_plan, followup_plans, graph_text, text)
+        graph_adjacent_add_plan = _plan_graph_add_adjacent_node(graph_text, context)
+        if graph_adjacent_add_plan is not None:
+            return _combine_with_followup_plans(
+                graph_adjacent_add_plan, followup_plans, graph_text, text
+            )
+        graph_add_connect_plan = _plan_graph_add_node_and_connect(graph_text, context)
+        if graph_add_connect_plan is not None:
+            return _combine_with_followup_plans(
+                graph_add_connect_plan, followup_plans, graph_text, text
+            )
+        graph_input_reroute_plan = _plan_graph_reroute_input(graph_text, context)
+        if graph_input_reroute_plan is not None:
+            return _combine_with_followup_plans(
+                graph_input_reroute_plan, followup_plans, graph_text, text
+            )
+        graph_reroute_plan = _plan_graph_reroute_connection(graph_text, context)
+        if graph_reroute_plan is not None:
+            return _combine_with_followup_plans(
+                graph_reroute_plan, followup_plans, graph_text, text
+            )
         graph_connect_plan = _plan_graph_connect(graph_text, context)
         if graph_connect_plan is not None:
             return _combine_with_followup_plans(graph_connect_plan, followup_plans, graph_text, text)
-        graph_add_plan = _plan_graph_add_node(graph_text)
+        graph_add_plan = _plan_graph_add_node(graph_text, context)
         if graph_add_plan is not None:
             return _combine_with_followup_plans(graph_add_plan, followup_plans, graph_text, text)
         prompt_role_plan = _plan_prompt_role_assignments(graph_text, context)
@@ -2861,7 +5299,16 @@ class RuleBasedPlanner:
                     }
                 ],
             }
-        custom_node_plan = _plan_custom_node_action(text)
+        manager_queue_control_plan = _plan_manager_queue_control(text)
+        if manager_queue_control_plan is not None:
+            return manager_queue_control_plan
+        manager_queue_status_plan = _plan_manager_queue_status(text)
+        if manager_queue_status_plan is not None:
+            return manager_queue_status_plan
+        model_install_plan = _plan_model_install(text)
+        if model_install_plan is not None:
+            return _with_restart_followup(model_install_plan, text)
+        custom_node_plan = _plan_custom_node_action(text, context)
         if custom_node_plan is not None:
             return custom_node_plan
         update_comfyui_plan = _plan_update_comfyui(text)
@@ -2914,8 +5361,16 @@ class RuleBasedPlanner:
             value = match.group(1) if match else "8"
             return {
                 "summary": f"Set compose reserve-vram to {value}",
-                "actions": [{"type": "compose.set_reserve_vram", "payload": {"value": value}}],
+                "actions": [
+                    {
+                        "type": "compose.set_command_value",
+                        "payload": {"flag": "--reserve-vram", "value": value},
+                    }
+                ],
             }
+        compose_value_plan = _plan_compose_command_value(text)
+        if compose_value_plan is not None:
+            return compose_value_plan
         compose_flag_plan = _plan_compose_command_flag(text)
         if compose_flag_plan is not None:
             return compose_flag_plan
@@ -2925,6 +5380,9 @@ class RuleBasedPlanner:
         prerender_free_memory_plan = _plan_prerender_free_memory(text)
         if prerender_free_memory_plan is not None:
             return prerender_free_memory_plan
+        service_logs_plan = _plan_service_logs(text)
+        if service_logs_plan is not None:
+            return service_logs_plan
         service_healthcheck_plan = _plan_service_healthcheck(text)
         if service_healthcheck_plan is not None:
             return service_healthcheck_plan
