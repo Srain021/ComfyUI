@@ -18,6 +18,17 @@ export function responseText(response) {
   return formatWorkbenchResponse(response || {}).message;
 }
 
+export function responseImages(response) {
+  if (!Array.isArray(response?.images)) {
+    return [];
+  }
+  return response.images.filter((image) => (
+    image
+    && image.kind === "image"
+    && (typeof image.url === "string" || typeof image.data_url === "string")
+  ));
+}
+
 function maxRisk(actions) {
   const order = ["read", "canvas", "package", "service", "elevated"];
   let best = "read";
@@ -30,24 +41,35 @@ function maxRisk(actions) {
   return best;
 }
 
+export function dryRunFromResponse(response) {
+  if (response?.status === "dry_run" && response.plan) {
+    return response;
+  }
+  if (response?.dry_run?.status === "dry_run" && response.dry_run.plan) {
+    return response.dry_run;
+  }
+  return null;
+}
+
 export function toolCardsFromResponse(response) {
-  if (response?.status !== "dry_run" || !response.plan || !Array.isArray(response.plan.actions)) {
+  const dryRun = dryRunFromResponse(response);
+  if (!dryRun || !Array.isArray(dryRun.plan.actions)) {
     return [];
   }
   if (
-    response.plan.actions.length === 1
-    && response.plan.actions[0]?.type === "context.collect"
+    dryRun.plan.actions.length === 1
+    && dryRun.plan.actions[0]?.type === "context.collect"
   ) {
     return [];
   }
   return [
     {
-      title: response.plan.requires_confirmation ? "需要允许" : "可执行计划",
-      summary: response.plan.summary || "Agent 生成了一个可执行计划",
-      requires_confirmation: Boolean(response.plan.requires_confirmation),
-      plan_hash: response.plan.plan_hash,
-      risk_level: response.plan.risk_level || maxRisk(response.plan.actions),
-      actions: response.plan.actions,
+      title: dryRun.plan.requires_confirmation ? "需要允许" : "可执行计划",
+      summary: dryRun.plan.summary || "Agent 生成了一个可执行计划",
+      requires_confirmation: Boolean(dryRun.plan.requires_confirmation),
+      plan_hash: dryRun.plan.plan_hash,
+      risk_level: dryRun.plan.risk_level || maxRisk(dryRun.plan.actions),
+      actions: dryRun.plan.actions,
     },
   ];
 }
@@ -67,6 +89,29 @@ function renderAttachments(parent, attachments) {
   const tray = parent.ownerDocument.createElement("div");
   tray.className = "agent-workbench-message-attachments";
   for (const attachment of attachments) {
+    const imageSrc = attachment?.url || attachment?.data_url;
+    if (attachment?.kind === "image" && typeof imageSrc === "string" && imageSrc) {
+      const link = parent.ownerDocument.createElement("a");
+      link.className = "agent-workbench-image-preview";
+      link.href = imageSrc;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      if (attachment.name) {
+        link.download = attachment.name;
+      }
+
+      const image = parent.ownerDocument.createElement("img");
+      image.src = imageSrc;
+      image.alt = attachment.name || "generated image";
+      image.loading = "lazy";
+      link.append(image);
+
+      const caption = parent.ownerDocument.createElement("span");
+      caption.textContent = attachment.name || "image";
+      link.append(caption);
+      tray.append(link);
+      continue;
+    }
     const chip = parent.ownerDocument.createElement("span");
     chip.className = `agent-workbench-attachment-chip agent-workbench-attachment-${attachment.kind || "file"}`;
     chip.textContent = attachment.name || attachment.kind || "attachment";
@@ -146,7 +191,10 @@ function renderMessage(parent, message, callbacks) {
   const title = message.role === "user" ? "你" : responseTitle(message.response);
   appendText(row, "agent-workbench-message-title", title);
   appendText(row, "agent-workbench-message-body", safeText(message.text) || responseText(message.response));
-  renderAttachments(row, message.attachments);
+  renderAttachments(row, [
+    ...(Array.isArray(message.attachments) ? message.attachments : []),
+    ...responseImages(message.response),
+  ]);
 
   const cards = message.tool_state?.status === "cancelled"
     ? []

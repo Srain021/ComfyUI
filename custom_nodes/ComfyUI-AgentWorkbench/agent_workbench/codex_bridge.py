@@ -17,6 +17,39 @@ DEFAULT_PORT = 8797
 DEFAULT_TIMEOUT = 180
 MAX_BODY_BYTES = 12_000_000
 MAX_IMAGE_ATTACHMENTS = 4
+AGENT_ACTION_CONTRACT_NAME = "agent_workbench_actions_v1"
+
+
+AGENT_ACTION_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assistant_message": {
+            "type": "string",
+            "description": "Chinese user-facing reply for the ComfyUI sidebar.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "Short English or Chinese action summary for Workbench dry-run cards.",
+        },
+        "actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string"},
+                    "payload_json": {
+                        "type": "string",
+                        "description": "A JSON object string for the Workbench action payload. Use {} when empty.",
+                    },
+                },
+                "required": ["type", "payload_json"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["assistant_message", "summary", "actions"],
+    "additionalProperties": False,
+}
 
 
 def responses_payload(text: str, *, model: str | None = None) -> dict:
@@ -45,13 +78,16 @@ def build_codex_prompt(request_payload: Mapping[str, Any]) -> str:
         instructions = ""
     if not isinstance(input_payload, str):
         input_payload = json.dumps(input_payload, ensure_ascii=False)
+    output_instruction = "只输出给用户看的最终回答。不要输出 JSON、Markdown 代码块或内部调试信息。"
+    if _uses_agent_action_contract(request_payload):
+        output_instruction = "只输出符合 JSON schema 的对象，不要输出 Markdown 代码块或额外文本。"
     return "\n\n".join(
         [
             "你是运行在 ComfyUI 侧边栏里的 Codex OAuth Agent bridge。",
             instructions.strip(),
             "下面是 Workbench 传来的上下文 JSON。请结合它回答用户。",
             input_payload.strip(),
-            "只输出给用户看的最终回答。不要输出 JSON、Markdown 代码块或内部调试信息。",
+            output_instruction,
         ]
     )
 
@@ -61,6 +97,7 @@ def codex_exec_command(
     output_file: Path,
     *,
     image_paths: list[Path] | None = None,
+    output_schema: Path | None = None,
 ) -> list[str]:
     command = [
         "codex",
@@ -79,8 +116,16 @@ def codex_exec_command(
     ]
     for image_path in image_paths or []:
         command.extend(["--image", str(image_path)])
+    if output_schema is not None:
+        command.extend(["--output-schema", str(output_schema)])
     command.append("-")
     return command
+
+
+def _uses_agent_action_contract(request_payload: Mapping[str, Any]) -> bool:
+    input_payload = _input_json(request_payload)
+    contract = input_payload.get("response_contract")
+    return isinstance(contract, Mapping) and contract.get("name") == AGENT_ACTION_CONTRACT_NAME
 
 
 def _input_json(request_payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -149,9 +194,21 @@ def run_codex_bridge_request(
     prompt = build_codex_prompt(request_payload)
     with tempfile.TemporaryDirectory(prefix="comfyui-codex-bridge-") as tmpdir:
         output_file = Path(tmpdir) / "last-message.txt"
+        schema_file = None
+        if _uses_agent_action_contract(request_payload):
+            schema_file = Path(tmpdir) / "agent-action-schema.json"
+            schema_file.write_text(
+                json.dumps(AGENT_ACTION_OUTPUT_SCHEMA, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         image_paths = extract_image_attachments(request_payload, tmpdir)
         completed = subprocess.run(
-            codex_exec_command(model, output_file, image_paths=image_paths),
+            codex_exec_command(
+                model,
+                output_file,
+                image_paths=image_paths,
+                output_schema=schema_file,
+            ),
             input=prompt,
             text=True,
             capture_output=True,

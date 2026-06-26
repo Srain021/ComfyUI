@@ -64,6 +64,35 @@ function createNode(id, type, slots = {}) {
   };
 }
 
+test("applyGraphActions accepts widget_name aliases from Codex action payloads", async () => {
+  const graph = createGraph();
+  graph.add(createNode(4, "CLIPTextEncode", {
+    widgets: [{ name: "text", value: "old prompt" }],
+  }));
+  const app = {
+    graph,
+    canvas: {
+      graph,
+      setDirty() {},
+    },
+  };
+
+  const { applyGraphActions } = await loadGraphActions(app);
+  const rows = applyGraphActions([
+    {
+      type: "graph.set_widget",
+      payload: {
+        node_id: 4,
+        widget_name: "text",
+        value: "handsome husky",
+      },
+    },
+  ]);
+
+  assert.equal(graph.getNodeById(4).widgets[0].value, "handsome husky");
+  assert.equal(rows[0].widget, "text");
+});
+
 test("applyGraphActions lets later graph actions reference newly added nodes", async () => {
   const graph = createGraph();
   graph.add(createNode(9, "KSampler", {

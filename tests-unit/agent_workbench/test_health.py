@@ -29,6 +29,8 @@ def test_health_payload_names_core_capabilities(monkeypatch):
     assert "custom_node.manage" in payload["capabilities"]
     assert "service.compose" in payload["capabilities"]
     assert "agent.chat" in payload["capabilities"]
+    assert "agent.codex_cli" in payload["capabilities"]
+    assert "agent.tool_planning" in payload["capabilities"]
     assert payload["sudo_policy"] == "print_only"
     assert payload["llm"]["configured"] is False
 
@@ -276,7 +278,8 @@ def test_frontend_restores_apply_state_when_apply_request_throws():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 
     apply_handler = script[script.index("async function applyToolMessage(message, confirmed) {"):]
-    assert "try {\n      const result = await applyDryRun(message.response, confirmed);" in apply_handler
+    assert "const dryRun = dryRunFromResponse(message?.response);" in apply_handler
+    assert "try {\n      const result = await applyDryRun(dryRun, confirmed);" in apply_handler
     assert "catch (error) {" in apply_handler
     assert "finally {\n      runningApplies.delete(message.id);\n      render();\n    }" in apply_handler
 

@@ -78,12 +78,12 @@ test("formatWorkbenchResponse is honest when AI is not connected", () => {
     ok: false,
     status: "ai_unavailable",
     assistant: {
-      title: "AI 未连接",
-      message: "还没有配置 OPENAI_API_KEY，所以不能像 Codex 一样自由回复。",
+      title: "Codex CLI 未连接",
+      message: "还没有配置 AGENT_WORKBENCH_LLM_ENDPOINT 指向宿主 Codex bridge。",
     },
   });
 
-  assert.equal(response.title, "AI 未连接");
-  assert.match(response.message, /OPENAI_API_KEY/);
+  assert.equal(response.title, "Codex CLI 未连接");
+  assert.match(response.message, /AGENT_WORKBENCH_LLM_ENDPOINT/);
   assert.equal(response.detailsLabel, "连接详情");
 });

@@ -8,6 +8,7 @@ import {
 } from "./attachments.mjs";
 import { createChatStore, historyForRequest } from "./chat-store.mjs";
 import {
+  dryRunFromResponse,
   renderChatTimeline,
   responseText,
   toolCardsFromResponse,
@@ -417,14 +418,15 @@ function createWorkbenchPanel(container) {
   }
 
   async function applyToolMessage(message, confirmed) {
-    if (!message?.id || runningApplies.has(message.id) || !message.response?.plan) {
+    const dryRun = dryRunFromResponse(message?.response);
+    if (!message?.id || runningApplies.has(message.id) || !dryRun?.plan) {
       return;
     }
     runningApplies.add(message.id);
     store.update(message.id, { tool_state: { status: "running" } });
     render();
     try {
-      const result = await applyDryRun(message.response, confirmed);
+      const result = await applyDryRun(dryRun, confirmed);
       store.update(message.id, {
         tool_state: {
           status: result.ok ? "applied" : "failed",

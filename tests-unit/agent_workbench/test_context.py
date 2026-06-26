@@ -561,7 +561,22 @@ def test_register_routes_adds_agent_plan_route():
         agent_routes._REGISTERED = False
 
 
-def test_agent_message_route_returns_plan_for_actionable_prompt():
+def test_agent_message_route_uses_llm_for_actionable_prompt(monkeypatch):
+    calls = []
+
+    def fake_build_assistant_reply(message, context, dry_run, history=None, attachments=None):
+        calls.append({"message": message, "dry_run": dry_run, "context": context})
+        return {
+            "ok": True,
+            "status": "assistant_reply",
+            "assistant": {
+                "title": "ComfyUI Codex Agent",
+                "message": "我会先说明计划，再让你决定是否执行。",
+            },
+            "dry_run": dry_run,
+        }
+
+    monkeypatch.setattr(agent_routes, "build_assistant_reply", fake_build_assistant_reply)
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
 
@@ -582,9 +597,12 @@ def test_agent_message_route_returns_plan_for_actionable_prompt():
         )
         payload = json.loads(response.text)
 
-        assert payload["status"] == "dry_run"
-        assert payload["plan"]["actions"][0]["type"] == "runtime.free_memory"
-        assert payload["plan"]["requires_confirmation"] is True
+        assert payload["status"] == "assistant_reply"
+        assert payload["assistant"]["message"] == "我会先说明计划，再让你决定是否执行。"
+        assert payload["dry_run"]["status"] == "dry_run"
+        assert payload["dry_run"]["plan"]["actions"][0]["type"] == "runtime.free_memory"
+        assert payload["dry_run"]["plan"]["requires_confirmation"] is True
+        assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "runtime.free_memory"
     finally:
         agent_routes._REGISTERED = False
 
@@ -622,6 +640,71 @@ def test_agent_message_route_returns_ai_status_for_conversation(monkeypatch):
         assert payload["ok"] is False
         assert "Codex" in payload["assistant"]["message"]
         assert payload["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_message_route_sends_self_image_request_to_codex_agent(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_build_assistant_reply(message, context, dry_run, history=None, attachments=None):
+        calls.append(
+            {
+                "message": message,
+                "context": context,
+                "dry_run": dry_run,
+                "history": history,
+                "attachments": attachments,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "assistant_reply",
+            "assistant": {"title": "ComfyUI Codex Agent", "message": "我会操作当前 ComfyUI 来生成。"},
+            "dry_run": {
+                "status": "dry_run",
+                "plan": {
+                    "summary": "Codex plan",
+                    "actions": [{"type": "runtime.queue_prompt", "payload": {"front": False}}],
+                },
+            },
+        }
+
+    monkeypatch.setattr(agent_routes, "build_assistant_reply", fake_build_assistant_reply)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "用你自己给我生成一个哈士奇的图片 要求帅",
+                        "history": [{"role": "user", "text": "上一轮"}],
+                        "attachments": [{"kind": "text", "name": "note.txt", "text": "参考"}],
+                        "graph": {"nodes": []},
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "assistant_reply"
+        assert "images" not in payload
+        assert payload["dry_run"]["plan"]["actions"][0]["type"] == "runtime.queue_prompt"
+        assert calls[0]["message"] == "用你自己给我生成一个哈士奇的图片 要求帅"
+        assert calls[0]["history"][0]["text"] == "上一轮"
+        assert calls[0]["attachments"][0]["name"] == "note.txt"
+        assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
     finally:
         agent_routes._REGISTERED = False
 
@@ -685,6 +768,70 @@ def test_agent_message_route_passes_history_and_attachments_to_llm(monkeypatch):
         assert calls[0]["history"] == [{"role": "user", "text": "上一轮"}]
         assert calls[0]["attachments"][0]["name"] == "workflow.png"
         assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+    finally:
+        agent_routes._REGISTERED = False
+
+
+def test_agent_message_route_uses_llm_for_best_available_model_question(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_build_assistant_reply(message, context, dry_run, history=None, attachments=None):
+        calls.append({"message": message, "dry_run": dry_run, "context": context})
+        return {
+            "ok": True,
+            "status": "assistant_reply",
+            "assistant": {
+                "title": "ComfyUI Codex Agent",
+                "message": "我会根据设备和当前工作流回答，而不是直接改 checkpoint。",
+            },
+        }
+
+    monkeypatch.setattr(agent_routes, "build_assistant_reply", fake_build_assistant_reply)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "你看看我的设备，我现在能用的最好的模型是什么",
+                        "graph": {
+                            "nodes": [
+                                {
+                                    "id": 4,
+                                    "type": "CheckpointLoaderSimple",
+                                    "title": "Checkpoint加载器（简易）",
+                                    "widgets": [
+                                        {
+                                            "name": "ckpt_name",
+                                            "value": "ace_step_v1_3.5b.safetensors",
+                                        }
+                                    ],
+                                }
+                            ],
+                            "links": [],
+                            "node_types": [],
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "assistant_reply"
+        assert calls[0]["message"] == "你看看我的设备，我现在能用的最好的模型是什么"
+        assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+        assert calls[0]["context"]["graph_input"]["nodes"][0]["id"] == 4
     finally:
         agent_routes._REGISTERED = False
 

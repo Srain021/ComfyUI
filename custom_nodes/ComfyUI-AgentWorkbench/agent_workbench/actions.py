@@ -117,13 +117,15 @@ def _normalize_action(action: object, index: int) -> dict:
         raise PlanValidationError(f"Action {index} type must be a string")
     if action_type not in ACTION_REGISTRY:
         raise PlanValidationError(f"Unsupported action type: {action_type} (action {index})")
-    payload = action.get("payload", {})
+    payload = deepcopy(action.get("payload", {}))
     if not isinstance(payload, dict):
         raise PlanValidationError(f"Action {index} payload must be an object: {action_type}")
+    if action_type == "graph.set_widget" and "widget" not in payload and "widget_name" in payload:
+        payload["widget"] = payload.pop("widget_name")
     capability, risk = ACTION_REGISTRY[action_type]
     return {
         "type": action_type,
-        "payload": deepcopy(payload),
+        "payload": payload,
         "capability": capability,
         "risk_level": risk,
     }

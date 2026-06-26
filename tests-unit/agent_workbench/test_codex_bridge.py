@@ -8,6 +8,7 @@ AGENT_ROOT = REPO_ROOT / "custom_nodes" / "ComfyUI-AgentWorkbench"
 sys.path.insert(0, str(AGENT_ROOT))
 
 from agent_workbench.codex_bridge import (
+    AGENT_ACTION_OUTPUT_SCHEMA,
     build_codex_prompt,
     codex_exec_command,
     extract_image_attachments,
@@ -61,6 +62,42 @@ def test_codex_exec_command_adds_image_arguments(tmp_path):
 
     image_index = command.index("--image")
     assert command[image_index + 1] == str(image_file)
+
+
+def test_codex_exec_command_adds_output_schema(tmp_path):
+    output_file = tmp_path / "last.txt"
+    schema_file = tmp_path / "schema.json"
+
+    command = codex_exec_command("gpt-5.5", output_file, output_schema=schema_file)
+
+    schema_index = command.index("--output-schema")
+    assert command[schema_index + 1] == str(schema_file)
+
+
+def test_codex_bridge_prompt_switches_to_json_contract_for_agent_mode():
+    prompt = build_codex_prompt(
+        {
+            "instructions": "You are ComfyUI Agent Workbench.",
+            "input": json.dumps(
+                {
+                    "user_message": "用你自己生成一张哈士奇图",
+                    "response_contract": {"name": "agent_workbench_actions_v1"},
+                },
+                ensure_ascii=False,
+            ),
+        }
+    )
+
+    assert "只输出符合 JSON schema 的对象" in prompt
+    assert "不要输出 JSON" not in prompt
+
+
+def test_agent_action_output_schema_uses_string_payload_for_strict_codex_schema():
+    action_schema = AGENT_ACTION_OUTPUT_SCHEMA["properties"]["actions"]["items"]
+
+    assert action_schema["additionalProperties"] is False
+    assert action_schema["properties"]["payload_json"]["type"] == "string"
+    assert "payload" not in action_schema["properties"]
 
 
 def test_extract_image_attachments_decodes_data_urls(tmp_path):

@@ -165,6 +165,33 @@
   min-height: 26px;
 }
 
+.agent-workbench-image-preview {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  max-width: 100%;
+  color: #cfe0f3;
+  text-decoration: none;
+}
+
+.agent-workbench-image-preview img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border: 1px solid rgba(180, 190, 205, 0.18);
+  border-radius: 8px;
+  background: #070a0f;
+}
+
+.agent-workbench-image-preview span {
+  overflow: hidden;
+  color: #9fb0c4;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-workbench-composer {
   display: grid;
   grid-template-rows: auto minmax(92px, 136px) auto;

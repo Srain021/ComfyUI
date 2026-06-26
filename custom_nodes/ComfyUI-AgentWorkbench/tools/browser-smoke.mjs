@@ -353,6 +353,9 @@ async function readOutput(client) {
   return pageCall(client, () => {
     const rows = JSON.parse(localStorage.getItem("ComfyUI.AgentWorkbench.chat.v1") || "[]");
     const latest = rows.slice().reverse().find((row) => row && row.response);
+    if (latest?.response?.dry_run?.status === "dry_run") {
+      return latest.response.dry_run;
+    }
     if (latest?.response) {
       return latest.response;
     }
