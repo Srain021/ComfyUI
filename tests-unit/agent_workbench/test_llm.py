@@ -280,6 +280,41 @@ def test_openai_payload_prioritizes_explicit_plugin_node_types_over_generic_matc
     assert relevant_types.index("AgnesTextToVideo") < 10
 
 
+def test_openai_payload_includes_current_frontend_ui_errors():
+    payload = build_openai_responses_payload(
+        "现在画布上面显示三个错误是什么",
+        context={
+            "graph_input": {
+                "nodes": [],
+                "links": [],
+                "node_types": [],
+                "ui_errors": [
+                    {
+                        "source": "dom",
+                        "severity": "error",
+                        "text": "3个错误：缺少 3 个所需输入",
+                    },
+                    {
+                        "source": "node",
+                        "severity": "error",
+                        "node_id": 14,
+                        "node_type": "UNETLoader",
+                        "title": "UNet加载器",
+                        "text": "Node is marked red in the current canvas.",
+                    },
+                ],
+            }
+        },
+        dry_run=_context_only_dry_run(),
+        model="gpt-test",
+    )
+    decoded = json.loads(payload["input"])
+
+    assert decoded["current_comfyui_context"]["ui_errors"][0]["text"] == "3个错误：缺少 3 个所需输入"
+    assert decoded["current_comfyui_context"]["ui_errors"][1]["node_type"] == "UNETLoader"
+    assert any("ui_errors" in row for row in decoded["agent_operating_guidance"])
+
+
 def test_assistant_reply_parses_codex_json_actions_into_dry_run():
     def fake_transport(endpoint, headers, payload, timeout):
         return {

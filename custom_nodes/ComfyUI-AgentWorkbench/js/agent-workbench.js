@@ -30,9 +30,32 @@ const MAX_GRAPH_LINKS = 1000;
 const MAX_NODE_TYPES = 1000;
 const MAX_NODE_TYPE_INPUTS = 128;
 const MAX_NODE_SLOTS = 64;
+const MAX_UI_ERRORS = 20;
+const MAX_UI_ERROR_TEXT_LENGTH = 800;
 const MAX_WIDGET_VALUE_LENGTH = 500;
 const MAX_NODE_PROPERTY_VALUE_LENGTH = 200;
 const MANAGER_NODE_PROPERTY_KEYS = ["cnr_id", "aux_id", "ver"];
+const NODE_ERROR_FIELDS = [
+  "errors",
+  "error",
+  "last_error",
+  "validation_error",
+  "validation_errors",
+  "execution_error",
+  "exception",
+];
+const DOM_ERROR_SELECTORS = [
+  ".p-toast-message-error",
+  ".p-toast-message-warn",
+  ".p-message-error",
+  ".p-message-warn",
+  "[role='alert']",
+  "[aria-live='assertive']",
+  "[data-testid*='error' i]",
+  "[data-testid*='warn' i]",
+  "[class*='error' i]",
+  "[class*='warn' i]",
+];
 
 function loadWorkbenchStylesheet() {
   if (document.getElementById(WORKBENCH_STYLESHEET_ID)) {
@@ -51,6 +74,26 @@ function boundedValue(value) {
     return `${value.slice(0, MAX_WIDGET_VALUE_LENGTH)}...`;
   }
   return value;
+}
+
+function boundedErrorText(value) {
+  let text = "";
+  if (typeof value === "string") {
+    text = value;
+  } else if (value instanceof Error) {
+    text = value.message || value.stack || "";
+  } else if (value !== undefined && value !== null) {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length > MAX_UI_ERROR_TEXT_LENGTH) {
+    return `${text.slice(0, MAX_UI_ERROR_TEXT_LENGTH)}...`;
+  }
+  return text;
 }
 
 function nodeProperties(properties) {
@@ -75,6 +118,199 @@ function slotRows(slots) {
     name: slot.name,
     type: slot.type,
   }));
+}
+
+function pushUiError(rows, seen, row) {
+  const text = boundedErrorText(row.text);
+  if (!text) {
+    return;
+  }
+  const normalized = { ...row, text };
+  const key = [
+    normalized.source,
+    normalized.node_id,
+    normalized.node_type,
+    normalized.title,
+    normalized.text,
+  ].join("|");
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  rows.push(normalized);
+}
+
+function visibleElementText(element) {
+  if (!(element instanceof HTMLElement)) {
+    return "";
+  }
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") {
+    return "";
+  }
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) {
+    return "";
+  }
+  return boundedErrorText(element.innerText || element.textContent || "");
+}
+
+function domErrorSource(element) {
+  const signature = `${element.id || ""} ${element.className || ""}`.toLowerCase();
+  if (signature.includes("toast")) {
+    return "toast";
+  }
+  if (element.getAttribute("role") === "alert") {
+    return "alert";
+  }
+  return "dom";
+}
+
+function domErrorSeverity(element) {
+  const signature = `${element.id || ""} ${element.className || ""}`.toLowerCase();
+  return signature.includes("warn") ? "warning" : "error";
+}
+
+function collectDomErrorText() {
+  const rows = [];
+  const seen = new Set();
+  for (const selector of DOM_ERROR_SELECTORS) {
+    let elements = [];
+    try {
+      elements = Array.from(document.querySelectorAll(selector));
+    } catch {
+      continue;
+    }
+    for (const element of elements) {
+      pushUiError(rows, seen, {
+        source: domErrorSource(element),
+        severity: domErrorSeverity(element),
+        text: visibleElementText(element),
+      });
+      if (rows.length >= MAX_UI_ERRORS) {
+        return rows;
+      }
+    }
+  }
+  return rows;
+}
+
+function parseCssColor(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const text = value.trim().toLowerCase();
+  if (text.includes("red")) {
+    return { r: 255, g: 0, b: 0 };
+  }
+  const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const raw = hex[1].length === 3
+      ? hex[1].split("").map((char) => `${char}${char}`).join("")
+      : hex[1];
+    return {
+      r: parseInt(raw.slice(0, 2), 16),
+      g: parseInt(raw.slice(2, 4), 16),
+      b: parseInt(raw.slice(4, 6), 16),
+    };
+  }
+  const rgb = text.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (rgb) {
+    return {
+      r: Number(rgb[1]),
+      g: Number(rgb[2]),
+      b: Number(rgb[3]),
+    };
+  }
+  return null;
+}
+
+function isRedishColor(value) {
+  const color = parseCssColor(value);
+  if (!color) {
+    return false;
+  }
+  return color.r >= 70 && color.r > color.g * 1.3 && color.r > color.b * 1.2;
+}
+
+function isRedNode(node) {
+  return isRedishColor(node?.color) || isRedishColor(node?.bgcolor);
+}
+
+function errorTextsFromValue(value, depth = 0) {
+  if (depth > 3 || value === undefined || value === null) {
+    return [];
+  }
+  if (typeof value === "string") {
+    const text = boundedErrorText(value);
+    return text ? [text] : [];
+  }
+  if (value instanceof Error) {
+    const text = boundedErrorText(value);
+    return text ? [text] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).flatMap((item) => errorTextsFromValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .slice(0, 16)
+      .flatMap(([key, child]) => {
+        const lowerKey = key.toLowerCase();
+        if (
+          depth > 1
+          && !["message", "text", "detail", "details", "error", "errors", "reason"].includes(lowerKey)
+        ) {
+          return [];
+        }
+        return errorTextsFromValue(child, depth + 1);
+      });
+  }
+  return [];
+}
+
+function nodeErrorRows() {
+  const rows = [];
+  const seen = new Set();
+  const nodes = app.graph?._nodes || [];
+  for (const node of nodes.slice(0, MAX_GRAPH_NODES)) {
+    const baseRow = {
+      source: "node",
+      severity: "error",
+      node_id: node.id,
+      node_type: node.type,
+      title: node.title,
+    };
+    const texts = NODE_ERROR_FIELDS.flatMap((field) => errorTextsFromValue(node[field]));
+    for (const text of texts) {
+      pushUiError(rows, seen, { ...baseRow, text });
+      if (rows.length >= MAX_UI_ERRORS) {
+        return rows;
+      }
+    }
+    if (!texts.length && isRedNode(node)) {
+      pushUiError(rows, seen, {
+        ...baseRow,
+        text: "Node is marked red in the current canvas.",
+      });
+      if (rows.length >= MAX_UI_ERRORS) {
+        return rows;
+      }
+    }
+  }
+  return rows;
+}
+
+function currentUiErrors() {
+  const rows = [];
+  const seen = new Set();
+  for (const row of [...collectDomErrorText(), ...nodeErrorRows()]) {
+    pushUiError(rows, seen, row);
+    if (rows.length >= MAX_UI_ERRORS) {
+      return rows;
+    }
+  }
+  return rows;
 }
 
 function nodeInputType(inputSpec) {
@@ -185,6 +421,7 @@ function currentGraphSnapshot() {
       type: link.type,
     })),
     node_types: registeredNodeTypes(),
+    ui_errors: currentUiErrors(),
   };
 }
 

@@ -922,6 +922,74 @@ def test_agent_plan_route_preserves_registered_node_types_for_planner():
         agent_routes._REGISTERED = False
 
 
+def test_agent_message_route_preserves_frontend_ui_errors_for_llm_context(monkeypatch):
+    agent_routes._REGISTERED = False
+    fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())
+    calls = []
+
+    def fake_build_assistant_reply(message, context, dry_run, history=None, attachments=None):
+        calls.append({"message": message, "context": context, "dry_run": dry_run})
+        return {
+            "ok": True,
+            "status": "assistant_reply",
+            "assistant": {
+                "title": "ComfyUI Codex Agent",
+                "message": "我看到了当前画布错误。",
+            },
+        }
+
+    monkeypatch.setattr(agent_routes, "build_assistant_reply", fake_build_assistant_reply)
+
+    try:
+        agent_routes.register_routes(fake_prompt_server)
+
+        app = web.Application()
+        app.add_routes(fake_prompt_server.routes)
+        routes_by_key = {
+            (route.method, route.resource.canonical): route
+            for route in app.router.routes()
+        }
+
+        response = asyncio.run(
+            routes_by_key[("POST", "/agent/message")].handler(
+                _FakeRequest(
+                    decoded_body={
+                        "message": "现在画布上面显示三个错误是什么",
+                        "graph": {
+                            "nodes": [],
+                            "links": [],
+                            "node_types": [],
+                            "ui_errors": [
+                                {
+                                    "source": "dom",
+                                    "severity": "error",
+                                    "text": "3个错误：缺少 3 个所需输入",
+                                },
+                                {
+                                    "source": "node",
+                                    "severity": "error",
+                                    "node_id": 14,
+                                    "node_type": "UNETLoader",
+                                    "title": "UNet加载器",
+                                    "text": "Node is marked red in the current canvas.",
+                                },
+                            ],
+                        },
+                    }
+                )
+            )
+        )
+        payload = json.loads(response.text)
+
+        assert payload["status"] == "assistant_reply"
+        ui_errors = calls[0]["context"]["graph_input"]["ui_errors"]
+        assert ui_errors[0]["text"] == "3个错误：缺少 3 个所需输入"
+        assert ui_errors[1]["node_type"] == "UNETLoader"
+        assert calls[0]["dry_run"]["plan"]["actions"][0]["type"] == "context.collect"
+    finally:
+        agent_routes._REGISTERED = False
+
+
 def test_agent_plan_route_preserves_registered_node_type_outputs_for_new_node_connections():
     agent_routes._REGISTERED = False
     fake_prompt_server = types.SimpleNamespace(routes=web.RouteTableDef())

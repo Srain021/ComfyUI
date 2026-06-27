@@ -18,6 +18,7 @@ MAX_HISTORY_ROWS = 12
 MAX_HISTORY_TEXT_CHARS = 1800
 MAX_TEXT_ATTACHMENT_CHARS = 12000
 MAX_RELEVANT_NODE_TYPES = 80
+MAX_UI_ERRORS = 20
 GENERIC_NODE_QUERY_TERMS = {
     "image",
     "video",
@@ -107,6 +108,7 @@ ACTION_PAYLOAD_GUIDANCE = {
 
 AGENT_OPERATING_GUIDANCE = [
     "Prefer graph actions for fast workflow building: graph.add_node, graph.connect, graph.set_widget, then runtime.queue_prompt when the user asks to run.",
+    "When current_comfyui_context.ui_errors is present, answer from those observed UI errors first; label any extra diagnosis as inference.",
     "Do not ask for a file-based workflow when registered_node_types_relevant contains the node classes needed for the request.",
     "Use exact input/output/widget names from registered_node_types_relevant; omit uncertain widgets instead of inventing parameters.",
     "Use node refs in graph.add_node payloads so later graph.connect actions can reference newly created nodes in the same plan.",
@@ -302,6 +304,13 @@ def _compact_context(context: Mapping[str, Any] | None, message: str = "") -> di
             compact["selected_nodes"] = selected
             if not selected:
                 compact["sample_nodes"] = [node for node in nodes[:8] if isinstance(node, Mapping)]
+        ui_errors = graph_input.get("ui_errors")
+        if isinstance(ui_errors, list):
+            compact["ui_errors"] = [
+                dict(row)
+                for row in ui_errors[:MAX_UI_ERRORS]
+                if isinstance(row, Mapping)
+            ]
         node_types = graph_input.get("node_types")
         if isinstance(node_types, list):
             compact["registered_node_types_sample"] = [

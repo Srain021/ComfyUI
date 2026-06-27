@@ -185,6 +185,16 @@ def test_frontend_graph_snapshot_includes_registered_node_types_for_add_planning
     assert "node_types: registeredNodeTypes()" in script
 
 
+def test_frontend_graph_snapshot_collects_visible_ui_errors_for_agent_context():
+    script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
+
+    assert "currentUiErrors()" in script
+    assert "collectDomErrorText" in script
+    assert "nodeErrorRows" in script
+    assert "ui_errors: currentUiErrors()" in script
+    assert "Node is marked red in the current canvas." in script
+
+
 def test_frontend_graph_snapshot_includes_manager_node_metadata_for_missing_nodes():
     script = (AGENT_ROOT / "js" / "agent-workbench.js").read_text()
 

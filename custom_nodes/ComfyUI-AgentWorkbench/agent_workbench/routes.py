@@ -14,6 +14,40 @@ _REGISTERED = False
 MAX_PLANNER_GRAPH_NODES = 500
 MAX_PLANNER_GRAPH_LINKS = 1000
 MAX_PLANNER_NODE_TYPES = 1000
+MAX_PLANNER_UI_ERRORS = 20
+MAX_PLANNER_UI_ERROR_TEXT_CHARS = 1000
+MAX_PLANNER_UI_ERROR_FIELD_CHARS = 200
+
+
+def _bounded_string(value: object, limit: int) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}..."
+
+
+def _bounded_ui_errors(graph: dict) -> list[dict]:
+    ui_errors = graph.get("ui_errors")
+    if not isinstance(ui_errors, list):
+        return []
+    rows = []
+    for item in ui_errors[:MAX_PLANNER_UI_ERRORS]:
+        if not isinstance(item, dict):
+            continue
+        text = _bounded_string(item.get("text"), MAX_PLANNER_UI_ERROR_TEXT_CHARS)
+        if not text:
+            continue
+        row: dict = {"text": text}
+        for key in ("source", "severity", "node_type", "title"):
+            value = _bounded_string(item.get(key), MAX_PLANNER_UI_ERROR_FIELD_CHARS)
+            if value:
+                row[key] = value
+        node_id = item.get("node_id")
+        if isinstance(node_id, (int, str)):
+            row["node_id"] = node_id
+        rows.append(row)
+    return rows
 
 
 def _bounded_graph_input(graph: object) -> dict:
@@ -28,7 +62,7 @@ def _bounded_graph_input(graph: object) -> dict:
         links = []
     if not isinstance(node_types, list):
         node_types = []
-    return {
+    bounded = {
         "nodes": [node for node in nodes[:MAX_PLANNER_GRAPH_NODES] if isinstance(node, dict)],
         "links": [link for link in links[:MAX_PLANNER_GRAPH_LINKS] if isinstance(link, dict)],
         "node_types": [
@@ -37,6 +71,10 @@ def _bounded_graph_input(graph: object) -> dict:
             if isinstance(row, dict) and isinstance(row.get("type"), str)
         ],
     }
+    ui_errors = _bounded_ui_errors(graph)
+    if ui_errors:
+        bounded["ui_errors"] = ui_errors
+    return bounded
 
 
 def _graph_from_body(body: dict) -> object:
